@@ -15,6 +15,8 @@
 #include <ESPAsyncWebServer.h>
 #include <LittleFS.h>
 
+#define FORMAT_LITTLEFS_IF_FAILED true
+
 const char *ssid = "SpaceBucks";
 const char *password = "EXCLAIM107";
 static bool eth_connected = false;
@@ -51,68 +53,6 @@ void onEvent(arduino_event_id_t event) {
     default: break;
   }
 }
-
-static const char *htmlContent PROGMEM = R"(
-<!DOCTYPE html>
-<html>
-<head>
-    <title>Sample HTML</title>
-</head>
-<body>
-    <h1>Hello, World!</h1>
-    <p>Lorem ipsum dolor sit amet, consectetur adipiscing elit. Proin euismod, purus a euismod
-    rhoncus, urna ipsum cursus massa, eu dictum tellus justo ac justo. Quisque ullamcorper
-    arcu nec tortor ullamcorper, vel fermentum justo fermentum. Vivamus sed velit ut elit
-    accumsan congue ut ut enim. Ut eu justo eu lacus varius gravida ut a tellus. Nulla facilisi.
-    Integer auctor consectetur ultricies. Fusce feugiat, mi sit amet bibendum viverra, orci leo
-    dapibus elit, id varius sem dui id lacus.</p>
-    <p>Lorem ipsum dolor sit amet, consectetur adipiscing elit. Proin euismod, purus a euismod
-    rhoncus, urna ipsum cursus massa, eu dictum tellus justo ac justo. Quisque ullamcorper
-    arcu nec tortor ullamcorper, vel fermentum justo fermentum. Vivamus sed velit ut elit
-    accumsan congue ut ut enim. Ut eu justo eu lacus varius gravida ut a tellus. Nulla facilisi.
-    Integer auctor consectetur ultricies. Fusce feugiat, mi sit amet bibendum viverra, orci leo
-    dapibus elit, id varius sem dui id lacus.</p>
-    <p>Lorem ipsum dolor sit amet, consectetur adipiscing elit. Proin euismod, purus a euismod
-    rhoncus, urna ipsum cursus massa, eu dictum tellus justo ac justo. Quisque ullamcorper
-    arcu nec tortor ullamcorper, vel fermentum justo fermentum. Vivamus sed velit ut elit
-    accumsan congue ut ut enim. Ut eu justo eu lacus varius gravida ut a tellus. Nulla facilisi.
-    Integer auctor consectetur ultricies. Fusce feugiat, mi sit amet bibendum viverra, orci leo
-    dapibus elit, id varius sem dui id lacus.</p>
-    <p>Lorem ipsum dolor sit amet, consectetur adipiscing elit. Proin euismod, purus a euismod
-    rhoncus, urna ipsum cursus massa, eu dictum tellus justo ac justo. Quisque ullamcorper
-    arcu nec tortor ullamcorper, vel fermentum justo fermentum. Vivamus sed velit ut elit
-    accumsan congue ut ut enim. Ut eu justo eu lacus varius gravida ut a tellus. Nulla facilisi.
-    Integer auctor consectetur ultricies. Fusce feugiat, mi sit amet bibendum viverra, orci leo
-    dapibus elit, id varius sem dui id lacus.</p>
-    <p>Lorem ipsum dolor sit amet, consectetur adipiscing elit. Proin euismod, purus a euismod
-    rhoncus, urna ipsum cursus massa, eu dictum tellus justo ac justo. Quisque ullamcorper
-    arcu nec tortor ullamcorper, vel fermentum justo fermentum. Vivamus sed velit ut elit
-    accumsan congue ut ut enim. Ut eu justo eu lacus varius gravida ut a tellus. Nulla facilisi.
-    Integer auctor consectetur ultricies. Fusce feugiat, mi sit amet bibendum viverra, orci leo
-    dapibus elit, id varius sem dui id lacus.</p>
-    <p>Lorem ipsum dolor sit amet, consectetur adipiscing elit. Proin euismod, purus a euismod
-    rhoncus, urna ipsum cursus massa, eu dictum tellus justo ac justo. Quisque ullamcorper
-    arcu nec tortor ullamcorper, vel fermentum justo fermentum. Vivamus sed velit ut elit
-    accumsan congue ut ut enim. Ut eu justo eu lacus varius gravida ut a tellus. Nulla facilisi.
-    Integer auctor consectetur ultricies. Fusce feugiat, mi sit amet bibendum viverra, orci leo
-    dapibus elit, id varius sem dui id lacus.</p>
-    <p>Lorem ipsum dolor sit amet, consectetur adipiscing elit. Proin euismod, purus a euismod
-    rhoncus, urna ipsum cursus massa, eu dictum tellus justo ac justo. Quisque ullamcorper
-    arcu nec tortor ullamcorper, vel fermentum justo fermentum. Vivamus sed velit ut elit
-    accumsan congue ut ut enim. Ut eu justo eu lacus varius gravida ut a tellus. Nulla facilisi.
-    Integer auctor consectetur ultricies. Fusce feugiat, mi sit amet bibendum viverra, orci leo
-    dapibus elit, id varius sem dui id lacus.</p>
-    <p>Lorem ipsum dolor sit amet, consectetur adipiscing elit. Proin euismod, purus a euismod
-    rhoncus, urna ipsum cursus massa, eu dictum tellus justo ac justo. Quisque ullamcorper
-    arcu nec tortor ullamcorper, vel fermentum justo fermentum. Vivamus sed velit ut elit
-    accumsan congue ut ut enim. Ut eu justo eu lacus varius gravida ut a tellus. Nulla facilisi.
-    Integer auctor consectetur ultricies. Fusce feugiat, mi sit amet bibendum viverra, orci leo
-    dapibus elit, id varius sem dui id lacus.</p>
-</body>
-</html>
-)";
-
-
 void testClient(const char *host, uint16_t port) {
   Serial.print("\nconnecting to ");
   Serial.println(host);
@@ -138,21 +78,13 @@ void setup() {
   Network.onEvent(onEvent);
   ETH.begin();
   WiFi.begin(ssid, password); 
-  LittleFS.begin(true);
 
-  {
-    File f = LittleFS.open("/index.html", "w");
-    assert(f);
-    f.print(htmlContent);
-    f.close();
-  } 
+if(!LittleFS.begin(FORMAT_LITTLEFS_IF_FAILED)){
+  Serial.println("LittleFS Mount Failed");
+  return;
+  }
 
-  server.on("/", HTTP_GET, [](AsyncWebServerRequest *request) {
-    request->redirect("/index.html");
-  });
-
-  // curl -v http://192.168.4.1/index.html
-  server.serveStatic("/index.html", LittleFS, "/index.html");
+  server.serveStatic("/", LittleFS, "/").setDefaultFile("index.html");
 
   server.begin();
 }
