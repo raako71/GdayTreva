@@ -14,8 +14,15 @@
 #include <WiFi.h>
 #include <ESPAsyncWebServer.h>
 #include <LittleFS.h>
+#include <ArduinoJson.h>
 
 #define FORMAT_LITTLEFS_IF_FAILED true
+
+struct Config { //example config
+  char hostname[64];
+  int port;
+};
+Config config;                         // <- global configuration object
 
 const char *ssid = "SpaceBucks";
 const char *password = "EXCLAIM107";
@@ -53,23 +60,72 @@ void onEvent(arduino_event_id_t event) {
     default: break;
   }
 }
-void testClient(const char *host, uint16_t port) {
-  Serial.print("\nconnecting to ");
-  Serial.println(host);
 
-  NetworkClient client;
-  if (!client.connect(host, port)) {
-    Serial.println("connection failed");
+void writeFile(fs::FS &fs, const char *path, const char *message) {
+  Serial.printf("Writing file: %s\r\n", path);
+
+  File file = fs.open(path, FILE_WRITE);
+  if (!file) {
+    Serial.println("- failed to open file for writing");
     return;
   }
-  client.printf("GET / HTTP/1.1\r\nHost: %s\r\n\r\n", host);
-  while (client.connected() && !client.available());
-  while (client.available()) {
-    Serial.write(client.read());
+  if (file.print(message)) {
+    Serial.println("- file written");
+  } else {
+    Serial.println("- write failed");
+  }
+  file.close();
+}
+
+
+void readSettings() {
+  Serial.println("Reading file: config.json");
+
+  File file = LittleFS.open("/config.json");
+  if (!file) {
+    Serial.println("Failed to open config");
+    writeFile(LittleFS, "/config.json", "this is a config");
+    return;
+  }
+  JsonDocument doc;
+  DeserializationError error = deserializeJson(doc, file);
+  if (error)
+    Serial.println(F("Failed to read file, using default configuration"));
+
+  Serial.println("Read Config.");
+  while (file.available()) {
+    config.port = doc["port"] | 2731;
+    strlcpy(config.hostname,                  // <- destination
+      doc["hostname"] | "example.com",  // <- source
+      sizeof(config.hostname));         // <- destination's capacity
+
+    Serial.write(file.read());
+  }
+  file.close();
+}
+
+void saveConfiguration(const char* filename, const Config& config) {
+  // Open file for writing
+  File file = LittleFS.open(filename, FILE_WRITE);
+  if (!file) {
+    Serial.println(F("Failed to create file"));
+    return;
   }
 
-  Serial.println("closing connection\n");
-  client.stop();
+  // Allocate a temporary JsonDocument
+  JsonDocument doc;
+
+  // Set the values in the document
+  doc["hostname"] = config.hostname;
+  doc["port"] = config.port;
+
+  // Serialize JSON to file
+  if (serializeJson(doc, file) == 0) {
+    Serial.println(F("Failed to write to file"));
+  }
+
+  // Close the file
+  file.close();
 }
 
 void setup() {
@@ -87,11 +143,13 @@ if(!LittleFS.begin(FORMAT_LITTLEFS_IF_FAILED)){
   server.serveStatic("/", LittleFS, "/").setDefaultFile("index.html");
 
   server.begin();
+  readSettings();
+  saveConfiguration("/config.json", config);
 }
 
 void loop() {
   if (eth_connected) {
-    testClient("google.com", 80);
+    Serial.print("online");
   }
   delay(10000);
 }
