@@ -5,6 +5,7 @@
 #include <ESPAsyncWebServer.h>
 #include <LittleFS.h>
 #include <ArduinoJson.h>
+#include <ESPmDNS.h>  // For mDNS support
 
 #define FORMAT_LITTLEFS_IF_FAILED true
 
@@ -17,9 +18,10 @@ Config config;  // Global configuration object
 static bool eth_connected = false;
 static AsyncWebServer server(80);
 
-// Event handler for Ethernet
-void onEvent(arduino_event_id_t event) {
+// Single event handler for all network events (Ethernet and WiFi)
+void networkEvent(arduino_event_id_t event) {
   switch (event) {
+    // Ethernet events
     case ARDUINO_EVENT_ETH_START:
       Serial.println("ETH Started");
       ETH.setHostname("esp32-ethernet");
@@ -29,35 +31,47 @@ void onEvent(arduino_event_id_t event) {
       break;
     case ARDUINO_EVENT_ETH_GOT_IP:
       Serial.println("ETH Got IP");
-      Serial.println(ETH);
+      Serial.println(ETH.localIP());
       eth_connected = true;
+      if (!MDNS.begin("esp32-ethernet")) {
+        Serial.println("Error setting up mDNS for Ethernet");
+      } else {
+        Serial.println("mDNS for Ethernet started");
+        MDNS.addService("http", "tcp", 80);
+      }
       break;
     case ARDUINO_EVENT_ETH_LOST_IP:
       Serial.println("ETH Lost IP");
       eth_connected = false;
+      MDNS.end();  // Clean up mDNS if IP lost
       break;
     case ARDUINO_EVENT_ETH_DISCONNECTED:
       Serial.println("ETH Disconnected");
       eth_connected = false;
+      MDNS.end();
       break;
     case ARDUINO_EVENT_ETH_STOP:
       Serial.println("ETH Stopped");
       eth_connected = false;
+      MDNS.end();
       break;
-    default:
-      break;
-  }
-}
-
-// Event handler for WiFi
-void WiFiEvent(WiFiEvent_t event) {
-  switch (event) {
+    // WiFi events
     case ARDUINO_EVENT_WIFI_STA_CONNECTED:
       Serial.println("\nWiFi connected.");
       break;
     case ARDUINO_EVENT_WIFI_STA_GOT_IP:
       Serial.print("\nWiFi IP address: ");
       Serial.println(WiFi.localIP());
+      if (!MDNS.begin("esp32-wifi")) {  // Optional: separate hostname
+        Serial.println("Error setting up mDNS for WiFi");
+      } else {
+        Serial.println("mDNS for WiFi started");
+        MDNS.addService("http", "tcp", 80);
+      }
+      break;
+    case ARDUINO_EVENT_WIFI_STA_DISCONNECTED:
+      Serial.println("\nWiFi disconnected.");
+      MDNS.end();  // Clean up if WiFi disconnects
       break;
     default:
       break;
@@ -110,8 +124,8 @@ void saveConfiguration(const char *filename, const Config &config) {
     return;
   }
   StaticJsonDocument<512> doc;
-  doc["ssid"] = config.ssid;        // Save SSID
-  doc["password"] = config.password; // Save password
+  doc["ssid"] = config.ssid;
+  doc["password"] = config.password;
 
   if (serializeJson(doc, file) == 0) {
     Serial.println(F("Failed to write to file"));
@@ -133,9 +147,8 @@ void setup() {
   Serial.begin(115200);
   Serial.println("\nboot");
 
-  // Assuming Network.onEvent should be ETH.onEvent
-  Network.onEvent(onEvent);  // Register Ethernet event handler
-  WiFi.onEvent(WiFiEvent); // Register WiFi event handler
+  // Register a single event handler for all network events (Ethernet and WiFi)
+  WiFi.onEvent(networkEvent);
 
   if (!LittleFS.begin(FORMAT_LITTLEFS_IF_FAILED)) {
     Serial.println("LittleFS Mount Failed");
@@ -144,7 +157,7 @@ void setup() {
 
   readSettings();
 
-  // Start Ethernet with explicit parameters
+  // Start Ethernet with your parameters (ESP32 Dev Module + LAN8720)
   if (!ETH.begin(ETH_PHY_LAN8720, 0, 23, 18, 5, ETH_CLOCK_GPIO17_OUT)) {
     Serial.println("Ethernet failed to start");
   }
