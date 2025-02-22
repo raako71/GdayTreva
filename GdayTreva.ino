@@ -12,6 +12,8 @@
 struct Config {
   char ssid[32];
   char password[64];
+  char mdns_wifi[32];    // mDNS hostname for WiFi
+  char mdns_eth[32];     // mDNS hostname for Ethernet
 };
 Config config;  // Global configuration object
 
@@ -24,7 +26,7 @@ void networkEvent(arduino_event_id_t event) {
     // Ethernet events
     case ARDUINO_EVENT_ETH_START:
       Serial.println("ETH Started");
-      ETH.setHostname("esp32-ethernet");
+      ETH.setHostname(config.mdns_eth);  // Use config for Ethernet hostname
       break;
     case ARDUINO_EVENT_ETH_CONNECTED:
       Serial.println("ETH Connected");
@@ -33,10 +35,10 @@ void networkEvent(arduino_event_id_t event) {
       Serial.println("ETH Got IP");
       Serial.println(ETH.localIP());
       eth_connected = true;
-      if (!MDNS.begin("esp32-ethernet")) {
+      if (!MDNS.begin(config.mdns_eth)) {  // Use config for mDNS hostname
         Serial.println("Error setting up mDNS for Ethernet");
       } else {
-        Serial.println("mDNS for Ethernet started");
+        Serial.println("mDNS for Ethernet started as " + String(config.mdns_eth) + ".local");
         MDNS.addService("http", "tcp", 80);
       }
       break;
@@ -62,10 +64,10 @@ void networkEvent(arduino_event_id_t event) {
     case ARDUINO_EVENT_WIFI_STA_GOT_IP:
       Serial.print("\nWiFi IP address: ");
       Serial.println(WiFi.localIP());
-      if (!MDNS.begin("esp32-wifi")) {  // Optional: separate hostname
+      if (!MDNS.begin(config.mdns_wifi)) {  // Use config for mDNS hostname
         Serial.println("Error setting up mDNS for WiFi");
       } else {
-        Serial.println("mDNS for WiFi started");
+        Serial.println("mDNS for WiFi started as " + String(config.mdns_wifi) + ".local");
         MDNS.addService("http", "tcp", 80);
       }
       break;
@@ -113,6 +115,8 @@ void readSettings() {
   Serial.println("Read Config.");
   strlcpy(config.ssid, doc["ssid"] | "defaultSSID", sizeof(config.ssid));
   strlcpy(config.password, doc["password"] | "defaultPass", sizeof(config.password));
+  strlcpy(config.mdns_wifi, doc["mdns_wifi"] | "esp32-wifi", sizeof(config.mdns_wifi));  // Default WiFi mDNS
+  strlcpy(config.mdns_eth, doc["mdns_eth"] | "esp32-ethernet", sizeof(config.mdns_eth));  // Default Ethernet mDNS
   file.close();
 }
 
@@ -126,6 +130,8 @@ void saveConfiguration(const char *filename, const Config &config) {
   StaticJsonDocument<512> doc;
   doc["ssid"] = config.ssid;
   doc["password"] = config.password;
+  doc["mdns_wifi"] = config.mdns_wifi;    // Save WiFi mDNS hostname
+  doc["mdns_eth"] = config.mdns_eth;      // Save Ethernet mDNS hostname
 
   if (serializeJson(doc, file) == 0) {
     Serial.println(F("Failed to write to file"));

@@ -1,1 +1,6 @@
-{"ssid":"SpaceBucks","password":"EXCLAIM107"}
+{
+	"ssid":"SpaceBucks",
+	"password":"EXCLAIM107",
+	"mdns_wifi": "gday",
+	"mdns_eth": "gdaylan"
+ }
