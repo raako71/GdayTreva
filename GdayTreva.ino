@@ -25,6 +25,7 @@ static bool eth_connected = false;
 static bool wifi_connected = false;  // Track WiFi connection separately
 static bool internet_connected = false;  // Flag for internet connectivity
 static AsyncWebServer server(80);
+static unsigned long lastNTPSync = 0;  // Track last NTP sync time
 
 // Single event handler for all network events (Ethernet and WiFi)
 void networkEvent(arduino_event_id_t event) {
@@ -42,9 +43,6 @@ void networkEvent(arduino_event_id_t event) {
       Serial.println("Ethernet IP: " + ETH.localIP().toString());
       eth_connected = true;
       checkInternetConnectivity();  // Check internet status
-      if (internet_connected) {
-        syncNTPTime();  // Sync time if internet is connected
-      }
       if (!MDNS.begin(config.mdns_hostname)) {  // Use single hostname for mDNS
         Serial.println("Error setting up mDNS for Ethernet: " + String(config.mdns_hostname));
       } else {
@@ -85,9 +83,6 @@ void networkEvent(arduino_event_id_t event) {
       Serial.print("\nWiFi IP address: ");
       Serial.println(WiFi.localIP().toString());
       checkInternetConnectivity();  // Check internet status
-      if (internet_connected) {
-        syncNTPTime();  // Sync time if internet is connected
-      }
       if (!MDNS.begin(config.mdns_hostname)) {  // Use single hostname for mDNS
         Serial.println("Error setting up mDNS for WiFi: " + String(config.mdns_hostname));
       } else {
@@ -148,6 +143,7 @@ void syncNTPTime() {
   } else {
     Serial.println("\nFailed to sync time from NTP");
   }
+  lastNTPSync = millis();  // Update last sync time
 }
 
 // Write to LittleFS
@@ -294,6 +290,9 @@ void setup() {
 }
 
 void loop() {
+  if (internet_connected && (millis() - lastNTPSync > 24 * 60 * 60 * 1000)) {  // Sync every 24 hours
+    syncNTPTime();
+  }
   if (eth_connected && internet_connected) {
     Serial.println("Ethernet online with internet");
   } else if (internet_connected) {

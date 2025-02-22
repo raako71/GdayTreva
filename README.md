@@ -10,3 +10,4 @@
  - 0.0.6: single event handler for Eth. 22 Feb 25
  - 0.0.7: mDNS added. 22 Feb 25
  - 0.0.8: NTP added. 22 Feb 25
+ - 0.0.9: NTP daily. 22 Feb 25
