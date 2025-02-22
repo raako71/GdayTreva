@@ -1,31 +1,19 @@
-#ifndef ETH_PHY_TYPE
-#define ETH_PHY_TYPE  ETH_PHY_LAN8720
-#define ETH_PHY_ADDR  0
-#define ETH_PHY_MDC   23
-#define ETH_PHY_MDIO  18
-#define ETH_PHY_POWER 5
-#define ETH_CLK_MODE  ETH_CLOCK_GPIO17_OUT
-#endif
-
 #include <ETH.h>
 #include <WiFi.h>
 #include <Arduino.h>
 #include <AsyncTCP.h>
-#include <WiFi.h>
 #include <ESPAsyncWebServer.h>
 #include <LittleFS.h>
 #include <ArduinoJson.h>
 
 #define FORMAT_LITTLEFS_IF_FAILED true
 
-struct Config { //example config
-  char hostname[64];
-  int port;
+struct Config {  //example config
+  char ssid[32];
+  char password[64];
 };
-Config config;                         // <- global configuration object
+Config config;  // <- global configuration object
 
-const char *ssid = "SpaceBucks";
-const char *password = "EXCLAIM107";
 static bool eth_connected = false;
 
 static AsyncWebServer server(80);
@@ -61,6 +49,19 @@ void onEvent(arduino_event_id_t event) {
   }
 }
 
+void WiFiEvent(WiFiEvent_t event) {
+  switch (event) {
+    case ARDUINO_EVENT_WIFI_STA_CONNECTED:
+      Serial.println("\nWiFi connected.");
+      break;
+    case ARDUINO_EVENT_WIFI_STA_GOT_IP:
+      Serial.print("\nWiFi IP address: ");
+      Serial.println(WiFi.localIP());
+      break;
+    default:
+      break;
+  }
+}
 void writeFile(fs::FS &fs, const char *path, const char *message) {
   Serial.printf("Writing file: %s\r\n", path);
 
@@ -77,34 +78,30 @@ void writeFile(fs::FS &fs, const char *path, const char *message) {
   file.close();
 }
 
-
 void readSettings() {
-  Serial.println("Reading file: config.json");
-
+  Serial.println("Reading config");
   File file = LittleFS.open("/config.json");
   if (!file) {
     Serial.println("Failed to open config");
-    writeFile(LittleFS, "/config.json", "this is a config");
     return;
   }
-  JsonDocument doc;
+  StaticJsonDocument<512> doc;  // Use StaticJsonDocument with a size
   DeserializationError error = deserializeJson(doc, file);
-  if (error)
-    Serial.println(F("Failed to read file, using default configuration"));
+  if (error) {
+    Serial.println(F("Failed to read file!!!: "));
+    Serial.println(error.c_str());  // Print error details
+    file.close();
+    return;
+  }
 
   Serial.println("Read Config.");
-  while (file.available()) {
-    config.port = doc["port"] | 2731;
-    strlcpy(config.hostname,                  // <- destination
-      doc["hostname"] | "example.com",  // <- source
-      sizeof(config.hostname));         // <- destination's capacity
+  strlcpy(config.ssid, doc["ssid"] | "defaultSSID", sizeof(config.ssid));
+  strlcpy(config.password, doc["password"] | "defaultPass", sizeof(config.password));
 
-    Serial.write(file.read());
-  }
   file.close();
 }
 
-void saveConfiguration(const char* filename, const Config& config) {
+void saveConfiguration(const char *filename, const Config &config) {
   // Open file for writing
   File file = LittleFS.open(filename, FILE_WRITE);
   if (!file) {
@@ -116,8 +113,8 @@ void saveConfiguration(const char* filename, const Config& config) {
   JsonDocument doc;
 
   // Set the values in the document
-  doc["hostname"] = config.hostname;
-  doc["port"] = config.port;
+  //doc["hostname"] = config.hostname;
+  //doc["port"] = config.port;
 
   // Serialize JSON to file
   if (serializeJson(doc, file) == 0) {
@@ -128,23 +125,66 @@ void saveConfiguration(const char* filename, const Config& config) {
   file.close();
 }
 
+void WIFI_Connect() {
+  Serial.print("\nConnecting to ");
+  Serial.println(config.ssid);
+  WiFi.mode(WIFI_STA);
+  WiFi.begin(config.ssid, config.password);
+}
+
 void setup() {
   Serial.begin(115200);
   Serial.println("\nboot");
   Network.onEvent(onEvent);
-  ETH.begin();
-  WiFi.begin(ssid, password); 
-
-if(!LittleFS.begin(FORMAT_LITTLEFS_IF_FAILED)){
-  Serial.println("LittleFS Mount Failed");
-  return;
+  WiFi.onEvent(WiFiEvent);
+  if (!LittleFS.begin(FORMAT_LITTLEFS_IF_FAILED)) {
+    Serial.println("LittleFS Mount Failed");
+    return;
   }
+  readSettings();
+  ETH.begin(
+    ETH_PHY_LAN8720,      // PHY type (eth_phy_type_t)
+    0,                    // PHY address (int32_t)
+    23,                   // MDC pin (int)
+    18,                   // MDIO pin (int)
+    5,                    // Power pin (int)
+    ETH_CLOCK_GPIO17_OUT  // Clock mode (eth_clock_mode_t)
+  );
+  WIFI_Connect();
 
   server.serveStatic("/", LittleFS, "/").setDefaultFile("index.html");
 
+  server.on("/getFile", HTTP_GET, [](AsyncWebServerRequest *request) {
+    if (request->hasParam("filename")) {
+      String filename = request->getParam("filename")->value();
+      Serial.println("Requested file: /" + filename);
+      if (LittleFS.exists("/" + filename)) {
+        Serial.println("File exists");
+        File file = LittleFS.open("/" + filename, "r");
+        if (file) {
+          Serial.println("File opened, size: " + String(file.size()));
+          String content = file.readString();
+          Serial.println("File content: " + content);
+          Serial.println("Free heap: " + String(ESP.getFreeHeap()));
+          file.close();
+          request->send(200, "text/plain", content);  // Send as string
+          return;
+        } else {
+          Serial.println("Failed to open file");
+          request->send(404, "text/plain", "File not found");
+        }
+      } else {
+        Serial.println("File does not exist");
+        request->send(404, "text/plain", "File not found");
+      }
+    } else {
+      Serial.println("No filename provided");
+      request->send(400, "text/plain", "Missing filename parameter");
+    }
+  });
+
   server.begin();
-  readSettings();
-  saveConfiguration("/config.json", config);
+  //saveConfiguration("/config.json", config);
 }
 
 void loop() {
