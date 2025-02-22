@@ -6,18 +6,24 @@
 #include <LittleFS.h>
 #include <ArduinoJson.h>
 #include <ESPmDNS.h>  // For mDNS support
+#include <time.h>     // For time functions
+#include <sys/time.h> // For struct timeval
 
 #define FORMAT_LITTLEFS_IF_FAILED true
 
 struct Config {
   char ssid[32];
   char password[64];
-  char mdns_wifi[32];    // mDNS hostname for WiFi
-  char mdns_eth[32];     // mDNS hostname for Ethernet
+  char mdns_hostname[32];  // Single mDNS hostname for both interfaces
+  char ntp_server[32];     // NTP server (e.g., "pool.ntp.org")
+  char timezone[64];       // Timezone string (e.g., "PST8PDT,M3.2.0,M11.1.0")
+  char internet_check_host[32];  // Host to check for internet connectivity (e.g., "8.8.8.8")
 };
 Config config;  // Global configuration object
 
 static bool eth_connected = false;
+static bool wifi_connected = false;  // Track WiFi connection separately
+static bool internet_connected = false;  // Flag for internet connectivity
 static AsyncWebServer server(80);
 
 // Single event handler for all network events (Ethernet and WiFi)
@@ -26,57 +32,121 @@ void networkEvent(arduino_event_id_t event) {
     // Ethernet events
     case ARDUINO_EVENT_ETH_START:
       Serial.println("ETH Started");
-      ETH.setHostname(config.mdns_eth);  // Use config for Ethernet hostname
+      ETH.setHostname(config.mdns_hostname);  // Use single hostname for Ethernet
       break;
     case ARDUINO_EVENT_ETH_CONNECTED:
       Serial.println("ETH Connected");
       break;
     case ARDUINO_EVENT_ETH_GOT_IP:
       Serial.println("ETH Got IP");
-      Serial.println(ETH.localIP());
+      Serial.println("Ethernet IP: " + ETH.localIP().toString());
       eth_connected = true;
-      if (!MDNS.begin(config.mdns_eth)) {  // Use config for mDNS hostname
-        Serial.println("Error setting up mDNS for Ethernet");
+      checkInternetConnectivity();  // Check internet status
+      if (internet_connected) {
+        syncNTPTime();  // Sync time if internet is connected
+      }
+      if (!MDNS.begin(config.mdns_hostname)) {  // Use single hostname for mDNS
+        Serial.println("Error setting up mDNS for Ethernet: " + String(config.mdns_hostname));
       } else {
-        Serial.println("mDNS for Ethernet started as " + String(config.mdns_eth) + ".local");
+        Serial.println("mDNS started as " + String(config.mdns_hostname) + ".local");
         MDNS.addService("http", "tcp", 80);
       }
       break;
     case ARDUINO_EVENT_ETH_LOST_IP:
       Serial.println("ETH Lost IP");
       eth_connected = false;
-      MDNS.end();  // Clean up mDNS if IP lost
+      checkInternetConnectivity();  // Re-check internet status (WiFi might still be connected)
+      if (!eth_connected && !wifi_connected) {  // End mDNS only if both interfaces are down
+        MDNS.end();  // Clean up mDNS when both interfaces lose IPs
+      }
       break;
     case ARDUINO_EVENT_ETH_DISCONNECTED:
       Serial.println("ETH Disconnected");
       eth_connected = false;
-      MDNS.end();
+      checkInternetConnectivity();  // Re-check internet status
+      if (!eth_connected && !wifi_connected) {  // End mDNS only if both interfaces are down
+        MDNS.end();  // Clean up mDNS when both interfaces disconnect
+      }
       break;
     case ARDUINO_EVENT_ETH_STOP:
       Serial.println("ETH Stopped");
       eth_connected = false;
-      MDNS.end();
+      checkInternetConnectivity();  // Re-check internet status
+      if (!eth_connected && !wifi_connected) {  // End mDNS only if both interfaces are down
+        MDNS.end();  // Clean up mDNS when both interfaces stop
+      }
       break;
     // WiFi events
     case ARDUINO_EVENT_WIFI_STA_CONNECTED:
       Serial.println("\nWiFi connected.");
+      wifi_connected = true;
       break;
     case ARDUINO_EVENT_WIFI_STA_GOT_IP:
       Serial.print("\nWiFi IP address: ");
-      Serial.println(WiFi.localIP());
-      if (!MDNS.begin(config.mdns_wifi)) {  // Use config for mDNS hostname
-        Serial.println("Error setting up mDNS for WiFi");
+      Serial.println(WiFi.localIP().toString());
+      checkInternetConnectivity();  // Check internet status
+      if (internet_connected) {
+        syncNTPTime();  // Sync time if internet is connected
+      }
+      if (!MDNS.begin(config.mdns_hostname)) {  // Use single hostname for mDNS
+        Serial.println("Error setting up mDNS for WiFi: " + String(config.mdns_hostname));
       } else {
-        Serial.println("mDNS for WiFi started as " + String(config.mdns_wifi) + ".local");
+        Serial.println("mDNS started as " + String(config.mdns_hostname) + ".local");
         MDNS.addService("http", "tcp", 80);
       }
       break;
     case ARDUINO_EVENT_WIFI_STA_DISCONNECTED:
       Serial.println("\nWiFi disconnected.");
-      MDNS.end();  // Clean up if WiFi disconnects
+      wifi_connected = false;
+      checkInternetConnectivity();  // Re-check internet status (Ethernet might still be connected)
+      if (!eth_connected && !wifi_connected) {  // End mDNS only if both interfaces are down
+        MDNS.end();  // Clean up mDNS when both interfaces disconnect
+      }
       break;
     default:
       break;
+  }
+}
+
+// Check if the device is connected to the internet
+void checkInternetConnectivity() {
+  const char* host = config.internet_check_host;  // Use config for internet check host
+  const int port = 53;                          // DNS port
+  WiFiClient client;
+
+  Serial.println("Checking internet connectivity to " + String(host) + "...");
+  if (client.connect(host, port, 5000)) {  // 5-second timeout
+    Serial.println("Internet connection confirmed");
+    internet_connected = true;
+    client.stop();
+  } else {
+    Serial.println("No internet connection");
+    internet_connected = false;
+  }
+}
+
+// Sync time from NTP server
+void syncNTPTime() {
+  Serial.println("Syncing time from NTP...");
+  configTime(0, 0, config.ntp_server);  // Set timezone offset and NTP server
+
+  // Set timezone
+  setenv("TZ", config.timezone, 1);  // Set timezone string (e.g., "PST8PDT,M3.2.0,M11.1.0")
+  tzset();
+
+  // Wait for time sync (up to 10 seconds)
+  time_t now = time(nullptr);
+  int attempts = 0;
+  while (now < 1000 && attempts < 10) {  // Ensure time is valid
+    delay(1000);
+    Serial.print(".");
+    now = time(nullptr);
+    attempts++;
+  }
+  if (now >= 1000) {
+    Serial.println("\nTime synced: " + String(ctime(&now)));
+  } else {
+    Serial.println("\nFailed to sync time from NTP");
   }
 }
 
@@ -101,7 +171,14 @@ void readSettings() {
   Serial.println("Reading config");
   File file = LittleFS.open("/config.json");
   if (!file) {
-    Serial.println("Failed to open config");
+    Serial.println("Failed to open config, using defaults");
+    // Set defaults if file is missing
+    strlcpy(config.ssid, "defaultSSID", sizeof(config.ssid));
+    strlcpy(config.password, "defaultPass", sizeof(config.password));
+    strlcpy(config.mdns_hostname, "gday", sizeof(config.mdns_hostname));
+    strlcpy(config.ntp_server, "pool.ntp.org", sizeof(config.ntp_server));
+    strlcpy(config.timezone, "PST8PDT,M3.2.0,M11.1.0", sizeof(config.timezone));  // Pacific Time as default
+    strlcpy(config.internet_check_host, "1.1.1.1", sizeof(config.internet_check_host));  // Default internet check host
     return;
   }
   StaticJsonDocument<512> doc;
@@ -115,8 +192,10 @@ void readSettings() {
   Serial.println("Read Config.");
   strlcpy(config.ssid, doc["ssid"] | "defaultSSID", sizeof(config.ssid));
   strlcpy(config.password, doc["password"] | "defaultPass", sizeof(config.password));
-  strlcpy(config.mdns_wifi, doc["mdns_wifi"] | "esp32-wifi", sizeof(config.mdns_wifi));  // Default WiFi mDNS
-  strlcpy(config.mdns_eth, doc["mdns_eth"] | "esp32-ethernet", sizeof(config.mdns_eth));  // Default Ethernet mDNS
+  strlcpy(config.mdns_hostname, doc["mdns_hostname"] | "gday", sizeof(config.mdns_hostname));
+  strlcpy(config.ntp_server, doc["ntp_server"] | "pool.ntp.org", sizeof(config.ntp_server));
+  strlcpy(config.timezone, doc["timezone"] | "PST8PDT,M3.2.0,M11.1.0", sizeof(config.timezone));
+  strlcpy(config.internet_check_host, doc["internet_check_host"] | "1.1.1.1", sizeof(config.internet_check_host));
   file.close();
 }
 
@@ -130,8 +209,10 @@ void saveConfiguration(const char *filename, const Config &config) {
   StaticJsonDocument<512> doc;
   doc["ssid"] = config.ssid;
   doc["password"] = config.password;
-  doc["mdns_wifi"] = config.mdns_wifi;    // Save WiFi mDNS hostname
-  doc["mdns_eth"] = config.mdns_eth;      // Save Ethernet mDNS hostname
+  doc["mdns_hostname"] = config.mdns_hostname;  // Save single mDNS hostname
+  doc["ntp_server"] = config.ntp_server;       // Save NTP server
+  doc["timezone"] = config.timezone;           // Save timezone
+  doc["internet_check_host"] = config.internet_check_host;  // Save internet check host
 
   if (serializeJson(doc, file) == 0) {
     Serial.println(F("Failed to write to file"));
@@ -162,6 +243,11 @@ void setup() {
   }
 
   readSettings();
+
+  // Power on LAN8720 PHY before initializing
+  pinMode(5, OUTPUT);  // Power pin (GPIO 5)
+  digitalWrite(5, HIGH);  // Turn on PHY (adjust if active-low)
+  delay(100);  // Allow PHY to stabilize
 
   // Start Ethernet with your parameters (ESP32 Dev Module + LAN8720)
   if (!ETH.begin(ETH_PHY_LAN8720, 0, 23, 18, 5, ETH_CLOCK_GPIO17_OUT)) {
@@ -208,8 +294,14 @@ void setup() {
 }
 
 void loop() {
-  if (eth_connected) {
-    Serial.println("Ethernet online");
+  if (eth_connected && internet_connected) {
+    Serial.println("Ethernet online with internet");
+  } else if (internet_connected) {
+    Serial.println("WiFi online with internet");
+  } else if (eth_connected) {
+    Serial.println("Ethernet online (no internet)");
+  } else {
+    Serial.println("WiFi online (no internet)");
   }
   delay(10000);
 }
