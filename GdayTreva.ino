@@ -32,10 +32,11 @@ static unsigned long lastNTPSync = 0;    // Track last NTP sync time
 static unsigned long lastInternetCheck = 0;  // Track last internet check
 static unsigned long lastTimeRetry = 0;     // Track last time/NTP retry attempt (renamed for clarity)
 static unsigned long internetCheckInterval = 60000;  // Initial internet check interval: 1 minute (60,000 ms)
-static unsigned long timeRetryInterval = 60000;      // Initial time/NTP retry interval: 1 minute (60,000 ms)
+static unsigned long timeRetryInterval = 30000;      // Initial time/NTP retry interval: 1 minute (60,000 ms)
 static int internetCheckCount = 0;                  // Count of consecutive internet check failures
 static int timeRetryCount = 0;                      // Count of consecutive time/NTP failures
 const unsigned long MAX_RETRY_INTERVAL = 24 * 60 * 60 * 1000;  // Max retry: 1 day (24 hours)
+unsigned long print_time_count = 0;
 
 // Single event handler for all network events (Ethernet and WiFi)
 void networkEvent(arduino_event_id_t event) {
@@ -195,11 +196,11 @@ bool syncNTPTime() {
 
 // Determine if internet check should occur (returns 1 if check is needed)
 int shouldCheckInternet() {
-  if (network_up) {
+  if (network_up && !internet_connected) {
     // Check for internet connectivity retry, with exponential backoff
     if (millis() - lastInternetCheck >= internetCheckInterval) {
       Serial.println("Retry internet connectivity check triggered (exponential backoff)");
-      return 1;  // Trigger internet check (independent of internet_connected)
+      return 1; 
     }
   }
   return 0;  // No check needed
@@ -383,11 +384,19 @@ void setup() {
 }
 
 void loop() {
+  if (millis() - print_time_count >= 10000) {
+    time_t now = time(nullptr);
+    char timeStr[50];
+    strftime(timeStr, sizeof(timeStr), "%Y-%m-%d %H:%M:%S", localtime(&now));
+    Serial.println("\nTime: " + String(ctime(&now)));
+    print_time_count = millis();
+  }
+    
   if (shouldCheckInternet() == 1) {
     checkInternetConnectivity();  // Trigger internet check
   }
   if (shouldCheckTime() == 1) {
-    syncNTPTime();  // Trigger time/NTP sync
+    //syncNTPTime();  // Trigger time/NTP sync
   }
 
   // Send time to WebSocket clients every 1 second

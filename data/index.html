@@ -1,32 +1,101 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-  <title>ESP32 Time Display</title>
-  <style>
-    #timeDisplay {
-      font-size: 24px;
-      margin: 20px;
-    }
-  </style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ESP32 Time Server</title>
+    <link rel="stylesheet" href="/styles.css"> <!-- Link to external stylesheet -->
 </head>
 <body>
-  <div id="timeDisplay">Waiting for time...</div>
+    <!-- Narrow div at the top showing time on the left -->
+    <div id="timeBar" class="time-bar">
+        <a id="timeLink" href="#" onclick="showSyncOverlay()">Loading...</a>
+    </div>
 
-  <script>
-    const ws = new WebSocket('ws://' + location.host + '/ws');
+    <!-- Overlay for syncing time and timezone -->
+    <div id="syncOverlay" class="overlay" style="display: none;">
+        <div class="overlay-content">
+            <h2>Sync Time and Timezone</h2>
+            <p>Click the button below to sync your local time and timezone with the server.</p>
+            <button onclick="syncTimeAndTimezone()">Sync Local Time and Timezone</button>
+        </div>
+    </div>
 
-    ws.onmessage = function(event) {
-      const data = JSON.parse(event.data);
-      document.getElementById('timeDisplay').textContent = 'Device Time: ' + data.time;
-    };
+    <!-- JavaScript for WebSocket, time updates, and sync logic -->
+    <script>
+        // WebSocket connection to the ESP32
+        const ws = new WebSocket('ws://' + window.location.hostname + '/ws');
 
-    ws.onerror = function(error) {
-      console.error('WebSocket error:', error);
-    };
+        ws.onmessage = function(event) {
+            const data = JSON.parse(event.data);
+            if (data.time) {
+                updateTime(data.time);
+            }
+        };
 
-    ws.onclose = function() {
-      console.log('WebSocket disconnected');
-    };
-  </script>
+        ws.onopen = function() {
+            console.log('WebSocket connection opened');
+        };
+
+        ws.onclose = function() {
+            console.log('WebSocket connection closed');
+            document.getElementById('timeLink').textContent = 'Disconnected';
+        };
+
+        ws.onerror = function(error) {
+            console.error('WebSocket error:', error);
+        };
+
+        // Update time display and check sync
+        function updateTime(serverTimeStr) {
+            const timeLink = document.getElementById('timeLink');
+            timeLink.textContent = serverTimeStr;
+
+            // Convert server time string to Date object (assuming format "YYYY-MM-DD HH:MM:SS")
+            const serverTime = new Date(serverTimeStr);
+            const clientTime = new Date();
+
+            // Calculate time difference in seconds
+            const timeDiff = Math.abs(clientTime - serverTime) / 1000; // Difference in seconds
+
+            // Check if server time is more than 5 seconds off from client time
+            if (timeDiff > 5) {
+                timeLink.style.color = 'red'; // Set time to red if out of sync
+            } else {
+                timeLink.style.color = 'black'; // Default color if in sync
+            }
+        }
+
+        // Show the sync overlay
+        function showSyncOverlay() {
+            document.getElementById('syncOverlay').style.display = 'block';
+        }
+
+        // Hide the sync overlay
+        function hideSyncOverlay() {
+            document.getElementById('syncOverlay').style.display = 'none';
+        }
+
+        // Sync local time and timezone (client-side example)
+        function syncTimeAndTimezone() {
+            // This is a client-side example; you might need server-side logic to handle this
+            const clientTime = new Date();
+            const timeStr = clientTime.toISOString().slice(0, 19).replace('T', ' '); // Format: "YYYY-MM-DD HH:MM:SS"
+            alert('Synced local time to: ' + timeStr + '. Update server time via WebSocket if needed.');
+
+            // Optionally, send a WebSocket message to the server to sync its time
+            ws.send(JSON.stringify({ command: 'sync_time', time: timeStr }));
+
+            hideSyncOverlay();
+        }
+
+        // Handle window clicks to close overlay if clicking outside
+        window.onclick = function(event) {
+            const overlay = document.getElementById('syncOverlay');
+            if (event.target == overlay) {
+                hideSyncOverlay();
+            }
+        };
+    </script>
 </body>
 </html>
