@@ -118,14 +118,17 @@ void onWsEvent(AsyncWebSocket *server, AsyncWebSocketClient *client, AwsEventTyp
     case WS_EVT_DATA: {
       Serial.printf("WebSocket client #%u sent data: %s\n", client->id(), (char *)data);
       // Handle incoming JSON data for time and timezone sync
-      StaticJsonDocument<256> doc;
+      StaticJsonDocument<512> doc;
       DeserializationError error = deserializeJson(doc, (char *)data, len);
       if (!error) {
         const char *command = doc["command"];
+        Serial.println("Parsed command: " + String(command ? command : "null"));
         if (command && strcmp(command, "sync_time") == 0) {
           const char *timeStr = doc["time"];
-          const char *tz = doc["tz"];
-          if (timeStr || tz) {
+          const char *tz = doc["tz"].as<const char*>() ? doc["tz"].as<const char*>() : "";
+          Serial.println("Parsed time: " + String(timeStr ? timeStr : "null"));
+          Serial.println("Parsed tz: " + String(tz));
+          if (timeStr || strlen(tz) > 0) {
             setTimeFromClient(timeStr, tz);
           }
         }
@@ -229,13 +232,15 @@ int shouldCheckInternet() {
   }
   return 0;  // No check needed
 }
-// Send current time to all WebSocket clients
+// Send current time and timezone to all WebSocket clients
 void sendTimeToClients() {
-  if (ws.count() > 0) {  // No time check since you don't care about it
+  if (ws.count() > 0) {
     time_t now = time(nullptr);
     char timeStr[50];
     strftime(timeStr, sizeof(timeStr), "%Y-%m-%d %H:%M:%S", localtime(&now));
-    ws.textAll("{\"time\":\"" + String(timeStr) + "\"}");  // Always send current time
+    // Create JSON with time and tz
+    String json = "{\"time\":\"" + String(timeStr) + "\",\"tz\":\"" + String(config.timezone) + "\"}";
+    ws.textAll(json);
   }
 }
 // Write to LittleFS

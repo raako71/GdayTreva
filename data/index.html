@@ -29,7 +29,7 @@
         ws.onmessage = function(event) {
             const data = JSON.parse(event.data);
             if (data.time) {
-                updateTime(data.time);
+                updateTime(data.time, data.tz);
             }
         };
 
@@ -46,10 +46,19 @@
             console.error('WebSocket error:', error);
         };
 
-        // Update time display and check sync
-        function updateTime(serverTimeStr) {
+        // Update time display with timezone and check sync
+        function updateTime(serverTimeStr, serverTz) {
             const timeLink = document.getElementById('timeLink');
-            timeLink.textContent = serverTimeStr;
+            // Convert POSIX timezone to UTC offset (e.g., "AEST-10" → "UTC+10")
+            let utcOffset = "UTC+0";
+            if (serverTz) {
+                const match = serverTz.match(/([A-Z]+)(-|\+)?(\d+)/);
+                if (match) {
+                    const offset = parseInt(match[3], 10);
+                    utcOffset = "UTC" + (match[2] === "-" ? "+" : "-") + offset;
+                }
+            }
+            timeLink.textContent = `${serverTimeStr} (${utcOffset})`;
 
             // Convert server time string to Date object (assuming format "YYYY-MM-DD HH:MM:SS")
             const serverTime = new Date(serverTimeStr);
@@ -79,15 +88,14 @@
         // Sync local time and timezone to server
         function syncTimeAndTimezone() {
             const clientTime = new Date();
-            // Format local time as "YYYY-MM-DD HH:MM:SS"
             const year = clientTime.getFullYear();
-            const month = String(clientTime.getMonth() + 1).padStart(2, '0'); // Months 0-11
+            const month = String(clientTime.getMonth() + 1).padStart(2, '0');
             const day = String(clientTime.getDate()).padStart(2, '0');
             const hours = String(clientTime.getHours()).padStart(2, '0');
             const minutes = String(clientTime.getMinutes()).padStart(2, '0');
             const seconds = String(clientTime.getSeconds()).padStart(2, '0');
             const timeStr = `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
-            const posixTz = "AEST-10"; // Replace with your POSIX timezone (e.g., "EET-2EEST,M3.5.0/2,M10.5.0/3" for EET)
+            const posixTz = "AEST-10"; // Adjust to your POSIX timezone
 
             const message = { 
                 command: 'sync_time', 
