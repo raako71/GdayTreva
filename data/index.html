@@ -76,16 +76,27 @@
             document.getElementById('syncOverlay').style.display = 'none';
         }
 
-        // Sync local time and timezone (client-side example)
+        // Sync local time and timezone to server
         function syncTimeAndTimezone() {
-            // This is a client-side example; you might need server-side logic to handle this
             const clientTime = new Date();
-            const timeStr = clientTime.toISOString().slice(0, 19).replace('T', ' '); // Format: "YYYY-MM-DD HH:MM:SS"
-            alert('Synced local time to: ' + timeStr + '. Update server time via WebSocket if needed.');
+            // Format local time as "YYYY-MM-DD HH:MM:SS"
+            const year = clientTime.getFullYear();
+            const month = String(clientTime.getMonth() + 1).padStart(2, '0'); // Months 0-11
+            const day = String(clientTime.getDate()).padStart(2, '0');
+            const hours = String(clientTime.getHours()).padStart(2, '0');
+            const minutes = String(clientTime.getMinutes()).padStart(2, '0');
+            const seconds = String(clientTime.getSeconds()).padStart(2, '0');
+            const timeStr = `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
+            const posixTz = "AEST-10"; // Replace with your POSIX timezone (e.g., "EET-2EEST,M3.5.0/2,M10.5.0/3" for EET)
 
-            // Optionally, send a WebSocket message to the server to sync its time
-            ws.send(JSON.stringify({ command: 'sync_time', time: timeStr }));
-
+            const message = { 
+                command: 'sync_time', 
+                time: timeStr, 
+                tz: posixTz 
+            };
+            ws.send(JSON.stringify(message));
+            console.log('Sent to server:', message);
+            alert('Sent time: ' + timeStr + ' and timezone: ' + posixTz + ' to server.');
             hideSyncOverlay();
         }
 

@@ -14,3 +14,4 @@
  - 0.0.10: NTP and internet checks on exponential delay. Websocket added. 23 Feb 25
  - 0.0.11: only trigger NTP and internet checks from timer. 23 Feb 25
  - 0.0.12: Building top div on webpage. Remove blocking code. Optimise and debug NTP.
+ - 0.0.13: Send time and TZ back to server over websocket.

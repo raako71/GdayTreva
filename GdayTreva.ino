@@ -115,10 +115,25 @@ void onWsEvent(AsyncWebSocket *server, AsyncWebSocketClient *client, AwsEventTyp
     case WS_EVT_DISCONNECT:
       Serial.printf("WebSocket client #%u disconnected\n", client->id());
       break;
-    case WS_EVT_DATA:
+    case WS_EVT_DATA: {
       Serial.printf("WebSocket client #%u sent data: %s\n", client->id(), (char *)data);
-      // Optional: Handle incoming data (e.g., commands from the client)
+      // Handle incoming JSON data for time and timezone sync
+      StaticJsonDocument<256> doc;
+      DeserializationError error = deserializeJson(doc, (char *)data, len);
+      if (!error) {
+        const char *command = doc["command"];
+        if (command && strcmp(command, "sync_time") == 0) {
+          const char *timeStr = doc["time"];
+          const char *tz = doc["tz"];
+          if (timeStr || tz) {
+            setTimeFromClient(timeStr, tz);
+          }
+        }
+      } else {
+        Serial.println("Failed to parse WebSocket JSON: " + String(error.c_str()));
+      }
       break;
+    }
     case WS_EVT_PONG:
     case WS_EVT_ERROR:
       break;
@@ -146,7 +161,7 @@ bool checkInternetConnectivity() {
     return false;
   }
 }
-
+// Sync time from NTP server with retry logic
 bool syncNTPTime() {
   static bool ntpConfigured = false;
   if (!ntpConfigured && network_up) {
@@ -169,7 +184,40 @@ bool syncNTPTime() {
   }
   return false;  // No sync check per your intent
 }
-
+// Set time and timezone from web client data, save to config
+void setTimeFromClient(const char *timeStr, const char *tz) {
+  if (timeStr) {
+    // Parse time string (expected format: "YYYY-MM-DD HH:MM:SS")
+    struct tm tm;
+    if (sscanf(timeStr, "%d-%d-%d %d:%d:%d", 
+               &tm.tm_year, &tm.tm_mon, &tm.tm_mday, 
+               &tm.tm_hour, &tm.tm_min, &tm.tm_sec) == 6) {
+      tm.tm_year -= 1900; // Years since 1900
+      tm.tm_mon -= 1;     // Months 0-11
+      tm.tm_isdst = -1;   // Let system determine DST
+      time_t t = mktime(&tm);
+      if (t != -1) {
+        struct timeval tv = { .tv_sec = t, .tv_usec = 0 };
+        settimeofday(&tv, NULL);
+        Serial.println("Time set from client: " + String(timeStr));
+      } else {
+        Serial.println("Failed to convert time string");
+      }
+    } else {
+      Serial.println("Invalid time format from client");
+    }
+  }
+  if (tz && strlen(tz) > 0) {
+    setenv("TZ", tz, 1);
+    tzset();
+    Serial.println("Timezone set from client: " + String(tz));
+    // Update config.timezone and save to file
+    strlcpy(config.timezone, tz, sizeof(config.timezone));
+    saveConfiguration("/config.json", config);
+  } else {
+    Serial.println("No valid timezone received from client");
+  }
+}
 // Determine if internet check should occur (returns 1 if check is needed)
 int shouldCheckInternet() {
   if (network_up && !internet_connected) {
@@ -191,9 +239,9 @@ void sendTimeToClients() {
   }
 }
 // Write to LittleFS
-void writeFile(fs::FS &fs, const char *path, const char *message) {
+void writeFile(const char *path, const char *message) {
   Serial.printf("Writing file: %s\r\n", path);
-  File file = fs.open(path, FILE_WRITE);
+  File file = LittleFS.open(path, FILE_WRITE);
   if (!file) {
     Serial.println("- failed to open file for writing");
     return;
