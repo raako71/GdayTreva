@@ -13,4 +13,4 @@
  - 0.0.9: NTP daily. 22 Feb 25
  - 0.0.10: NTP and internet checks on exponential delay. Websocket added. 23 Feb 25
  - 0.0.11: only trigger NTP and internet checks from timer. 23 Feb 25
- - 0.0.12: Building top div on webpage, prep to remove blocking code 23 Feb 25
+ - 0.0.12: Building top div on webpage. Remove blocking code. Optimise and debug NTP.

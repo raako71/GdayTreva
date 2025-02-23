@@ -21,16 +21,14 @@ Config config;  // Global configuration object
 static bool eth_connected = false;
 static bool wifi_connected = false;      // Track WiFi connection separately
 static bool internet_connected = false;  // Flag for internet connectivity
-static bool time_recieved = false;       // Flag for NTP time sync status (only updated on NTP success/failure)
 static bool network_up = false;          // Flag for any network (Ethernet or WiFi) being connected with IP
 static AsyncWebServer server(80);
 static AsyncWebSocket ws("/ws");                               // WebSocket endpoint at /ws
 static unsigned long lastInternetCheck = 0;                    // Track last internet check
-static unsigned long lastTimeRetry = 0;                        // Track last time/NTP retry attempt (renamed for clarity)
 static unsigned long internetCheckInterval = 60000;            // Initial internet check interval: 1 minute (60,000 ms)
 static int internetCheckCount = 0;                             // Count of consecutive internet check failures
-const unsigned long MAX_RETRY_INTERVAL = 24 * 60 * 60 * 1000;  // Max retry: 1 day (24 hours)
 unsigned long print_time_count = 0;
+const unsigned long ONE_DAY_MS = 24 * 60 * 60 * 1000UL;
 // Single event handler for all network events (Ethernet and WiFi)
 void networkEvent(arduino_event_id_t event) {
   switch (event) {
@@ -144,21 +142,34 @@ bool checkInternetConnectivity() {
     Serial.println("No internet connection");
     internet_connected = false;                                                  // Update the global flag here
     internetCheckCount++;                                                        // Increment failure count
-    internetCheckInterval = min(internetCheckInterval * 2, MAX_RETRY_INTERVAL);  // Double interval, cap at 24 hours
+    internetCheckInterval = min(internetCheckInterval * 2, ONE_DAY_MS); // Inline cap
     return false;
   }
 }
-// Sync time from NTP server with retry logic
+
 bool syncNTPTime() {
   static bool ntpConfigured = false;
   if (!ntpConfigured && network_up) {
     Serial.println("Configuring NTP with server: " + String(config.ntp_server));
-    configTime(0, 0, config.ntp_server);
-    setenv("TZ", config.timezone, 1);
-    tzset();
+    if (config.ntp_server && strlen(config.ntp_server) > 0) {
+      configTime(0, 0, config.ntp_server);
+      Serial.println("configTime called");
+    } else {
+      Serial.println("NTP server invalid, skipping");
+      return false;
+    }
+    if (config.timezone && strlen(config.timezone) > 0) {
+      setenv("TZ", config.timezone, 1);
+      tzset();
+      Serial.println("Timezone set: " + String(config.timezone));
+    } else {
+      Serial.println("Timezone invalid, skipping");
+    }
     ntpConfigured = true;
   }
+  return false;  // No sync check per your intent
 }
+
 // Determine if internet check should occur (returns 1 if check is needed)
 int shouldCheckInternet() {
   if (network_up && !internet_connected) {
@@ -170,16 +181,13 @@ int shouldCheckInternet() {
   }
   return 0;  // No check needed
 }
-
 // Send current time to all WebSocket clients
 void sendTimeToClients() {
-  if (ws.count() > 0 && time_recieved) {  // Check if there are connected clients and time is synced
+  if (ws.count() > 0) {  // No time check since you don't care about it
     time_t now = time(nullptr);
     char timeStr[50];
     strftime(timeStr, sizeof(timeStr), "%Y-%m-%d %H:%M:%S", localtime(&now));
-    ws.textAll("{"time":"" + String(timeStr) + ""}");  // Send JSON-formatted time
-  } else if (ws.count() > 0 && !time_recieved) {
-    ws.textAll("{"time":"Time not synced"}");  // Notify client if time isn’t available
+    ws.textAll("{\"time\":\"" + String(timeStr) + "\"}");  // Always send current time
   }
 }
 // Write to LittleFS
