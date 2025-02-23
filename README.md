@@ -11,3 +11,4 @@
  - 0.0.7: mDNS added. 22 Feb 25
  - 0.0.8: NTP added. 22 Feb 25
  - 0.0.9: NTP daily. 22 Feb 25
+ - 0.0.10: NTP and internet checks on exponential delay. Websocket added. 23 Feb 25

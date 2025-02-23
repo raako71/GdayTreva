@@ -1,10 +1,32 @@
+<!DOCTYPE html>
 <html>
 <head>
-<title>TEST</title>
-<head/>
+  <title>ESP32 Time Display</title>
+  <style>
+    #timeDisplay {
+      font-size: 24px;
+      margin: 20px;
+    }
+  </style>
+</head>
 <body>
-<h1 style="text-align:center">
-HELLO WORLD
-</h1>
+  <div id="timeDisplay">Waiting for time...</div>
+
+  <script>
+    const ws = new WebSocket('ws://' + location.host + '/ws');
+
+    ws.onmessage = function(event) {
+      const data = JSON.parse(event.data);
+      document.getElementById('timeDisplay').textContent = 'Device Time: ' + data.time;
+    };
+
+    ws.onerror = function(error) {
+      console.error('WebSocket error:', error);
+    };
+
+    ws.onclose = function() {
+      console.log('WebSocket disconnected');
+    };
+  </script>
 </body>
-<HTML/>
+</html>
