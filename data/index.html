@@ -31,7 +31,8 @@
     };
     let lastMessageTime = Date.now();
     let heartbeatInterval;
-    let disconnectTimeStr = null; // Store the disconnection time once
+    let disconnectTimeStr = null;
+    const HEARTBEAT_TIMEOUT = 15000; // 15 seconds in milliseconds
 
     function connectWebSocket() {
         ws = new WebSocket('ws://' + window.location.hostname + '/ws');
@@ -51,9 +52,9 @@
             console.log('WebSocket connection opened');
             document.getElementById('timeLink').textContent = 'Connected';
             lastMessageTime = Date.now();
-            disconnectTimeStr = null; // Reset on reconnect
+            disconnectTimeStr = null;
             heartbeatInterval = setInterval(() => {
-                if (ws.readyState === WebSocket.OPEN && Date.now() - lastMessageTime > 15000) {
+                if (ws.readyState === WebSocket.OPEN && Date.now() - lastMessageTime > HEARTBEAT_TIMEOUT) {
                     console.log('Heartbeat timeout: No messages for 15s. Closing connection.');
                     ws.close();
                 }
@@ -62,9 +63,10 @@
 
         ws.onclose = function() {
             console.log('WebSocket connection closed');
-            clearInterval(heartbeatInterval); // Stop heartbeat immediately
-            if (!disconnectTimeStr) { // Set only once
-                const disconnectTime = new Date();
+            clearInterval(heartbeatInterval);
+            if (!disconnectTimeStr) {
+                // Subtract the heartbeat timeout from the current time to estimate when the connection was lost
+                const disconnectTime = new Date(Date.now() - HEARTBEAT_TIMEOUT);
                 disconnectTimeStr = `${disconnectTime.getFullYear()}-${String(disconnectTime.getMonth() + 1).padStart(2, '0')}-${String(disconnectTime.getDate()).padStart(2, '0')} ${String(disconnectTime.getHours()).padStart(2, '0')}:${String(disconnectTime.getMinutes()).padStart(2, '0')}:${String(disconnectTime.getSeconds()).padStart(2, '0')}`;
             }
             document.getElementById('timeLink').textContent = `Lost connection at ${disconnectTimeStr}. Waiting to reconnect`;
