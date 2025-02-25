@@ -8,34 +8,36 @@
 #include <ESPmDNS.h>   // For mDNS support
 #include <time.h>      // For time functions
 #include <sys/time.h>  // For struct timeval
+
 #define FORMAT_LITTLEFS_IF_FAILED true
+
 struct Config {
   char ssid[32];
   char password[64];
   char mdns_hostname[32];        // Single mDNS hostname for both interfaces
   char ntp_server[32];           // NTP server (e.g., "pool.ntp.org")
-  char timezone[64];             // Timezone string (e.g., "PST8PDT,M3.2.0,M11.1.0")
   char internet_check_host[32];  // Host to check for internet connectivity (e.g., "8.8.8.8")
 };
+
 Config config;  // Global configuration object
 static bool eth_connected = false;
-static bool wifi_connected = false;      // Track WiFi connection separately
-static bool internet_connected = false;  // Flag for internet connectivity
-static bool network_up = false;          // Flag for any network (Ethernet or WiFi) being connected with IP
+static bool wifi_connected = false;
+static bool internet_connected = false;
+static bool network_up = false;
 static AsyncWebServer server(80);
-static AsyncWebSocket ws("/ws");                               // WebSocket endpoint at /ws
-static unsigned long lastInternetCheck = 0;                    // Track last internet check
-static unsigned long internetCheckInterval = 60000;            // Initial internet check interval: 1 minute (60,000 ms)
-static int internetCheckCount = 0;                             // Count of consecutive internet check failures
+static AsyncWebSocket ws("/ws");
+static unsigned long lastInternetCheck = 0;
+static unsigned long internetCheckInterval = 60000;
+static int internetCheckCount = 0;
 unsigned long print_time_count = 0;
 const unsigned long ONE_DAY_MS = 24 * 60 * 60 * 1000UL;
-// Single event handler for all network events (Ethernet and WiFi)
+unsigned long totalHeap = 0;
+
 void networkEvent(arduino_event_id_t event) {
   switch (event) {
-    // Ethernet events
     case ARDUINO_EVENT_ETH_START:
       Serial.println("ETH Started");
-      ETH.setHostname(config.mdns_hostname);  // Use single hostname for Ethernet
+      ETH.setHostname(config.mdns_hostname);
       break;
     case ARDUINO_EVENT_ETH_CONNECTED:
       Serial.println("ETH Connected");
@@ -45,35 +47,34 @@ void networkEvent(arduino_event_id_t event) {
       Serial.println("Ethernet IP: " + ETH.localIP().toString());
       eth_connected = true;
       network_up = true;
-      checkInternetConnectivity();              // Initial internet check on connection
-      syncNTPTime();                            // Initial NTP sync
-      if (!MDNS.begin(config.mdns_hostname)) {  // Use single hostname for mDNS
+      checkInternetConnectivity();
+      syncNTPTime();
+      if (!MDNS.begin(config.mdns_hostname)) {
         Serial.println("Error setting up mDNS for Ethernet: " + String(config.mdns_hostname));
       } else {
         Serial.println("mDNS started as " + String(config.mdns_hostname) + ".local");
         MDNS.addService("http", "tcp", 80);
-        MDNS.addService("ws", "tcp", 80);  // Advertise WebSocket service
+        MDNS.addService("ws", "tcp", 80);
       }
       break;
     case ARDUINO_EVENT_ETH_LOST_IP:
       Serial.println("ETH Lost IP");
       eth_connected = false;
-      network_up = eth_connected || wifi_connected;  // Update network_up
+      network_up = eth_connected || wifi_connected;
       if (!network_up) {
         internet_connected = false;
-        MDNS.end();  // Clean up mDNS when both interfaces lose IPs
+        MDNS.end();
       }
       break;
     case ARDUINO_EVENT_ETH_STOP:
       Serial.println("ETH Stopped");
       eth_connected = false;
-      network_up = eth_connected || wifi_connected;  // Update network_up
+      network_up = eth_connected || wifi_connected;
       if (!network_up) {
         internet_connected = false;
-        MDNS.end();  // Clean up mDNS when both interfaces stop
+        MDNS.end();
       }
       break;
-    // WiFi events
     case ARDUINO_EVENT_WIFI_STA_CONNECTED:
       Serial.println("\nWiFi connected.");
       wifi_connected = true;
@@ -83,22 +84,22 @@ void networkEvent(arduino_event_id_t event) {
       Serial.println(WiFi.localIP().toString());
       wifi_connected = true;
       network_up = true;
-      checkInternetConnectivity();              // Initial internet check on connection
-      syncNTPTime();                            // Initial NTP sync
-      if (!MDNS.begin(config.mdns_hostname)) {  // Use single hostname for mDNS
+      checkInternetConnectivity();
+      syncNTPTime();
+      if (!MDNS.begin(config.mdns_hostname)) {
         Serial.println("Error setting up mDNS for WiFi: " + String(config.mdns_hostname));
       } else {
         Serial.println("mDNS started as " + String(config.mdns_hostname) + ".local");
         MDNS.addService("http", "tcp", 80);
-        MDNS.addService("ws", "tcp", 80);  // Advertise WebSocket service
+        MDNS.addService("ws", "tcp", 80);
       }
       break;
     case ARDUINO_EVENT_WIFI_STA_DISCONNECTED:
       Serial.println("\nWiFi disconnected.");
       wifi_connected = false;
-      network_up = eth_connected || wifi_connected;  // Update network_up
+      network_up = eth_connected || wifi_connected;
       if (!network_up) {
-        MDNS.end();  // Clean up mDNS when both interfaces disconnect
+        MDNS.end();
         internet_connected = false;
       }
       break;
@@ -106,7 +107,7 @@ void networkEvent(arduino_event_id_t event) {
       break;
   }
 }
-// WebSocket event handler
+
 void onWsEvent(AsyncWebSocket *server, AsyncWebSocketClient *client, AwsEventType type, void *arg, uint8_t *data, size_t len) {
   switch (type) {
     case WS_EVT_CONNECT:
@@ -117,19 +118,14 @@ void onWsEvent(AsyncWebSocket *server, AsyncWebSocketClient *client, AwsEventTyp
       break;
     case WS_EVT_DATA: {
       Serial.printf("WebSocket client #%u sent data: %s\n", client->id(), (char *)data);
-      // Handle incoming JSON data for time and timezone sync
       StaticJsonDocument<512> doc;
       DeserializationError error = deserializeJson(doc, (char *)data, len);
       if (!error) {
         const char *command = doc["command"];
-        Serial.println("Parsed command: " + String(command ? command : "null"));
         if (command && strcmp(command, "sync_time") == 0) {
           const char *timeStr = doc["time"];
-          const char *tz = doc["tz"].as<const char*>() ? doc["tz"].as<const char*>() : "";
-          Serial.println("Parsed time: " + String(timeStr ? timeStr : "null"));
-          Serial.println("Parsed tz: " + String(tz));
-          if (timeStr || strlen(tz) > 0) {
-            setTimeFromClient(timeStr, tz);
+          if (timeStr) {
+            setTimeFromClient(timeStr);
           }
         }
       } else {
@@ -142,67 +138,59 @@ void onWsEvent(AsyncWebSocket *server, AsyncWebSocketClient *client, AwsEventTyp
       break;
   }
 }
-// Check if the device is connected to the internet (returns true if connected)
+
 bool checkInternetConnectivity() {
-  const char *host = config.internet_check_host;  // Use config for internet check host
-  const int port = 53;                            // DNS port
+  const char *host = config.internet_check_host;
+  const int port = 53;
   WiFiClient client;
   Serial.println("Checking internet connectivity to " + String(host) + "...");
-  if (client.connect(host, port, 5000)) {  // 5-second timeout
+  if (client.connect(host, port, 5000)) {
     Serial.println("Internet connection confirmed");
-    internet_connected = true;      // Update the global flag here
-    internetCheckCount = 0;         // Reset failure count on success
-    internetCheckInterval = 60000;  // Reset interval to 1 minute
-    lastInternetCheck = millis();   // Update last check time
+    internet_connected = true;
+    internetCheckCount = 0;
+    internetCheckInterval = 60000;
+    lastInternetCheck = millis();
     client.stop();
     return true;
   } else {
     Serial.println("No internet connection");
-    internet_connected = false;                                                  // Update the global flag here
-    internetCheckCount++;                                                        // Increment failure count
-    internetCheckInterval = min(internetCheckInterval * 2, ONE_DAY_MS); // Inline cap
+    internet_connected = false;
+    internetCheckCount++;
+    internetCheckInterval = min(internetCheckInterval * 2, ONE_DAY_MS);
     return false;
   }
 }
-// Sync time from NTP server with retry logic
+
 bool syncNTPTime() {
   static bool ntpConfigured = false;
   if (!ntpConfigured && network_up) {
     Serial.println("Configuring NTP with server: " + String(config.ntp_server));
     if (config.ntp_server && strlen(config.ntp_server) > 0) {
-      configTime(0, 0, config.ntp_server);
-      Serial.println("configTime called");
+      configTime(0, 0, config.ntp_server); // UTC only
+      Serial.println("configTime called with UTC");
+      ntpConfigured = true;
     } else {
       Serial.println("NTP server invalid, skipping");
       return false;
     }
-    if (config.timezone && strlen(config.timezone) > 0) {
-      setenv("TZ", config.timezone, 1);
-      tzset();
-      Serial.println("Timezone set: " + String(config.timezone));
-    } else {
-      Serial.println("Timezone invalid, skipping");
-    }
-    ntpConfigured = true;
   }
-  return false;  // No sync check per your intent
+  return false;
 }
-// Set time and timezone from web client data, save to config
-void setTimeFromClient(const char *timeStr, const char *tz) {
+
+void setTimeFromClient(const char *timeStr) {
   if (timeStr) {
-    // Parse time string (expected format: "YYYY-MM-DD HH:MM:SS")
     struct tm tm;
     if (sscanf(timeStr, "%d-%d-%d %d:%d:%d", 
                &tm.tm_year, &tm.tm_mon, &tm.tm_mday, 
                &tm.tm_hour, &tm.tm_min, &tm.tm_sec) == 6) {
-      tm.tm_year -= 1900; // Years since 1900
-      tm.tm_mon -= 1;     // Months 0-11
-      tm.tm_isdst = -1;   // Let system determine DST
+      tm.tm_year -= 1900;
+      tm.tm_mon -= 1;
+      tm.tm_isdst = -1; // No DST, UTC
       time_t t = mktime(&tm);
       if (t != -1) {
         struct timeval tv = { .tv_sec = t, .tv_usec = 0 };
         settimeofday(&tv, NULL);
-        Serial.println("Time set from client: " + String(timeStr));
+        Serial.println("Time set from client (UTC): " + String(timeStr));
       } else {
         Serial.println("Failed to convert time string");
       }
@@ -210,40 +198,28 @@ void setTimeFromClient(const char *timeStr, const char *tz) {
       Serial.println("Invalid time format from client");
     }
   }
-  if (tz && strlen(tz) > 0) {
-    setenv("TZ", tz, 1);
-    tzset();
-    Serial.println("Timezone set from client: " + String(tz));
-    // Update config.timezone and save to file
-    strlcpy(config.timezone, tz, sizeof(config.timezone));
-    saveConfiguration("/config.json", config);
-  } else {
-    Serial.println("No valid timezone received from client");
-  }
 }
-// Determine if internet check should occur (returns 1 if check is needed)
+
 int shouldCheckInternet() {
   if (network_up && !internet_connected) {
-    // Check for internet connectivity retry, with exponential backoff
     if (millis() - lastInternetCheck >= internetCheckInterval) {
       Serial.println("Retry internet connectivity check triggered (exponential backoff)");
       return 1;
     }
   }
-  return 0;  // No check needed
+  return 0;
 }
-// Send current time and timezone to all WebSocket clients
+
 void sendTimeToClients() {
   if (ws.count() > 0) {
     time_t now = time(nullptr);
-    char timeStr[50];
-    strftime(timeStr, sizeof(timeStr), "%Y-%m-%d %H:%M:%S", localtime(&now));
-    // Create JSON with time and tz
-    String json = "{\"time\":\"" + String(timeStr) + "\",\"tz\":\"" + String(config.timezone) + "\"}";
+    unsigned long freeHeap = ESP.getFreeHeap();
+    unsigned long usedHeap = totalHeap - freeHeap;
+    String json = "{\"epoch\":" + String(now) + ",\"mem_used\":" + String(usedHeap) + ",\"mem_total\":" + String(totalHeap) + "}";
     ws.textAll(json);
   }
 }
-// Write to LittleFS
+
 void writeFile(const char *path, const char *message) {
   Serial.printf("Writing file: %s\r\n", path);
   File file = LittleFS.open(path, FILE_WRITE);
@@ -258,19 +234,17 @@ void writeFile(const char *path, const char *message) {
   }
   file.close();
 }
-// Read configuration from LittleFS
+
 void readSettings() {
   Serial.println("Reading config");
   File file = LittleFS.open("/config.json");
   if (!file) {
     Serial.println("Failed to open config, using defaults");
-    // Set defaults if file is missing
     strlcpy(config.ssid, "defaultSSID", sizeof(config.ssid));
     strlcpy(config.password, "defaultPass", sizeof(config.password));
     strlcpy(config.mdns_hostname, "gday", sizeof(config.mdns_hostname));
     strlcpy(config.ntp_server, "pool.ntp.org", sizeof(config.ntp_server));
-    strlcpy(config.timezone, "PST8PDT,M3.2.0,M11.1.0", sizeof(config.timezone));         // Pacific Time as default
-    strlcpy(config.internet_check_host, "1.1.1.1", sizeof(config.internet_check_host));  // Default internet check host
+    strlcpy(config.internet_check_host, "1.1.1.1", sizeof(config.internet_check_host));
     return;
   }
   StaticJsonDocument<512> doc;
@@ -286,11 +260,10 @@ void readSettings() {
   strlcpy(config.password, doc["password"] | "defaultPass", sizeof(config.password));
   strlcpy(config.mdns_hostname, doc["mdns_hostname"] | "gday", sizeof(config.mdns_hostname));
   strlcpy(config.ntp_server, doc["ntp_server"] | "pool.ntp.org", sizeof(config.ntp_server));
-  strlcpy(config.timezone, doc["timezone"] | "PST8PDT,M3.2.0,M11.1.0", sizeof(config.timezone));
   strlcpy(config.internet_check_host, doc["internet_check_host"] | "1.1.1.1", sizeof(config.internet_check_host));
   file.close();
 }
-// Save configuration to LittleFS
+
 void saveConfiguration(const char *filename, const Config &config) {
   File file = LittleFS.open(filename, FILE_WRITE);
   if (!file) {
@@ -300,10 +273,9 @@ void saveConfiguration(const char *filename, const Config &config) {
   StaticJsonDocument<512> doc;
   doc["ssid"] = config.ssid;
   doc["password"] = config.password;
-  doc["mdns_hostname"] = config.mdns_hostname;              // Save single mDNS hostname
-  doc["ntp_server"] = config.ntp_server;                    // Save NTP server
-  doc["timezone"] = config.timezone;                        // Save timezone
-  doc["internet_check_host"] = config.internet_check_host;  // Save internet check host
+  doc["mdns_hostname"] = config.mdns_hostname;
+  doc["ntp_server"] = config.ntp_server;
+  doc["internet_check_host"] = config.internet_check_host;
   if (serializeJson(doc, file) == 0) {
     Serial.println(F("Failed to write to file"));
   } else {
@@ -311,19 +283,20 @@ void saveConfiguration(const char *filename, const Config &config) {
   }
   file.close();
 }
-// Connect to WiFi
+
 void WIFI_Connect() {
   Serial.print("\nConnecting to ");
   Serial.println(config.ssid);
   WiFi.mode(WIFI_STA);
   WiFi.begin(config.ssid, config.password);
 }
+
 void setup() {
   Serial.begin(115200);
   Serial.println("\nboot");
-  // Register a single event handler for all network events (Ethernet and WiFi)
+  totalHeap = ESP.getHeapSize();
+  Serial.println("Total heap size: " + String(totalHeap) + " bytes");
   WiFi.onEvent(networkEvent);
-  // Initialize WebSocket
   ws.onEvent(onWsEvent);
   server.addHandler(&ws);
   if (!LittleFS.begin(FORMAT_LITTLEFS_IF_FAILED)) {
@@ -331,18 +304,14 @@ void setup() {
     return;
   }
   readSettings();
-  // Power on LAN8720 PHY before initializing
-  pinMode(5, OUTPUT);     // Power pin (GPIO 5)
-  digitalWrite(5, HIGH);  // Turn on PHY (adjust if active-low)
-  delay(100);             // Allow PHY to stabilize
-  // Start Ethernet with your parameters (ESP32 Dev Module + LAN8720)
+  pinMode(5, OUTPUT);
+  digitalWrite(5, HIGH);
+  delay(100);
   if (!ETH.begin(ETH_PHY_LAN8720, 0, 23, 18, 5, ETH_CLOCK_GPIO17_OUT)) {
     Serial.println("Ethernet failed to start");
   }
   WIFI_Connect();
-  // Serve static files from LittleFS
   server.serveStatic("/", LittleFS, "/").setDefaultFile("index.html");
-  // Handle /getFile endpoint
   server.on("/getFile", HTTP_GET, [](AsyncWebServerRequest *request) {
     if (request->hasParam("filename")) {
       String filename = request->getParam("filename")->value();
@@ -371,25 +340,26 @@ void setup() {
     }
   });
   server.begin();
-  // Uncomment to save config if needed
-  // saveConfiguration("/config.json", config);
 }
+
 void loop() {
   if (millis() - print_time_count >= 10000) {
     time_t now = time(nullptr);
     char timeStr[50];
-    strftime(timeStr, sizeof(timeStr), "%Y-%m-%d %H:%M:%S", localtime(&now));
-    Serial.println("\nTime: " + String(ctime(&now)));
+    strftime(timeStr, sizeof(timeStr), "%Y-%m-%d %H:%M:%S", gmtime(&now)); // UTC time
+    Serial.print("UTC Time: ");
+    Serial.print(timeStr);
+    Serial.print(" WiFi IP address: ");
+    Serial.println(WiFi.localIP().toString());
     print_time_count = millis();
   }
   if (shouldCheckInternet() == 1) {
-    checkInternetConnectivity();  // Trigger internet check
+    checkInternetConnectivity();
   }
-  // Send time to WebSocket clients every 1 second
   static unsigned long lastTimeSend = 0;
   if (millis() - lastTimeSend > 1000) {
     sendTimeToClients();
     lastTimeSend = millis();
   }
-  delay(10);  // Small delay to prevent blocking, but let FreeRTOS handle tasks
+  delay(10);
 }

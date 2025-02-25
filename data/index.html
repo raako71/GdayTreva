@@ -4,117 +4,156 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>ESP32 Time Server</title>
-    <link rel="stylesheet" href="/styles.css"> <!-- Link to external stylesheet -->
+    <link rel="stylesheet" href="/styles.css">
 </head>
 <body>
-    <!-- Narrow div at the top showing time on the left -->
     <div id="timeBar" class="time-bar">
         <a id="timeLink" href="#" onclick="showSyncOverlay()">Loading...</a>
     </div>
-
-    <!-- Overlay for syncing time and timezone -->
     <div id="syncOverlay" class="overlay" style="display: none;">
         <div class="overlay-content">
-            <h2>Sync Time and Timezone</h2>
-            <p>Click the button below to sync your local time and timezone with the server.</p>
-            <button onclick="syncTimeAndTimezone()">Sync Local Time and Timezone</button>
+            <div id="serverData">
+                <p>Time: <span id="serverTime">N/A</span></p>
+                <p>Heap Used (KB): <span id="heapUsed">N/A</span></p>
+                <p>Heap Available (KB): <span id="heapTotal">N/A</span></p>
+            </div>
+            <h2>Sync Time</h2>
+            <p>Click to sync your local time with the server.</p>
+            <button onclick="syncTimeAndTimezone()">Sync Local Time</button>
         </div>
     </div>
-
-    <!-- JavaScript for WebSocket, time updates, and sync logic -->
     <script>
-        // WebSocket connection to the ESP32
-        const ws = new WebSocket('ws://' + window.location.hostname + '/ws');
+    let ws;
+    let latestData = {
+        epoch: null,
+        mem_used: null,
+        mem_total: null
+    };
+    let lastMessageTime = Date.now();
+    let heartbeatInterval;
+    let disconnectTimeStr = null; // Store the disconnection time once
+
+    function connectWebSocket() {
+        ws = new WebSocket('ws://' + window.location.hostname + '/ws');
 
         ws.onmessage = function(event) {
+            lastMessageTime = Date.now();
             const data = JSON.parse(event.data);
-            if (data.time) {
-                updateTime(data.time, data.tz);
+            if (data.epoch) {
+                latestData.epoch = data.epoch;
+                latestData.mem_used = data.mem_used;
+                latestData.mem_total = data.mem_total;
+                updateTime(data.epoch, data.mem_used, data.mem_total);
             }
         };
 
         ws.onopen = function() {
             console.log('WebSocket connection opened');
+            document.getElementById('timeLink').textContent = 'Connected';
+            lastMessageTime = Date.now();
+            disconnectTimeStr = null; // Reset on reconnect
+            heartbeatInterval = setInterval(() => {
+                if (ws.readyState === WebSocket.OPEN && Date.now() - lastMessageTime > 15000) {
+                    console.log('Heartbeat timeout: No messages for 15s. Closing connection.');
+                    ws.close();
+                }
+            }, 5000);
         };
 
         ws.onclose = function() {
             console.log('WebSocket connection closed');
-            document.getElementById('timeLink').textContent = 'Disconnected';
+            clearInterval(heartbeatInterval); // Stop heartbeat immediately
+            if (!disconnectTimeStr) { // Set only once
+                const disconnectTime = new Date();
+                disconnectTimeStr = `${disconnectTime.getFullYear()}-${String(disconnectTime.getMonth() + 1).padStart(2, '0')}-${String(disconnectTime.getDate()).padStart(2, '0')} ${String(disconnectTime.getHours()).padStart(2, '0')}:${String(disconnectTime.getMinutes()).padStart(2, '0')}:${String(disconnectTime.getSeconds()).padStart(2, '0')}`;
+            }
+            document.getElementById('timeLink').textContent = `Lost connection at ${disconnectTimeStr}. Waiting to reconnect`;
+            attemptReconnect();
         };
 
         ws.onerror = function(error) {
             console.error('WebSocket error:', error);
+            ws.close();
         };
+    }
 
-        // Update time display with timezone and check sync
-        function updateTime(serverTimeStr, serverTz) {
-            const timeLink = document.getElementById('timeLink');
-            // Convert POSIX timezone to UTC offset (e.g., "AEST-10" → "UTC+10")
-            let utcOffset = "UTC+0";
-            if (serverTz) {
-                const match = serverTz.match(/([A-Z]+)(-|\+)?(\d+)/);
-                if (match) {
-                    const offset = parseInt(match[3], 10);
-                    utcOffset = "UTC" + (match[2] === "-" ? "+" : "-") + offset;
-                }
-            }
-            timeLink.textContent = `${serverTimeStr} (${utcOffset})`;
+    function attemptReconnect() {
+        const reconnectInterval = 10000;
+        console.log('Attempting to reconnect in 10 seconds...');
+        setTimeout(() => {
+            connectWebSocket();
+        }, reconnectInterval);
+    }
 
-            // Convert server time string to Date object (assuming format "YYYY-MM-DD HH:MM:SS")
-            const serverTime = new Date(serverTimeStr);
-            const clientTime = new Date();
+    connectWebSocket();
 
-            // Calculate time difference in seconds
-            const timeDiff = Math.abs(clientTime - serverTime) / 1000; // Difference in seconds
+    function updateTime(epoch, memUsed, memTotal) {
+        const timeLink = document.getElementById('timeLink');
+        const date = new Date(epoch * 1000);
+        const year = date.getFullYear();
+        const month = String(date.getMonth() + 1).padStart(2, '0');
+        const day = String(date.getDate()).padStart(2, '0');
+        const hours = String(date.getHours()).padStart(2, '0');
+        const minutes = String(date.getMinutes()).padStart(2, '0');
+        const seconds = String(date.getSeconds()).padStart(2, '0');
+        const timeStr = `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
 
-            // Check if server time is more than 5 seconds off from client time
-            if (timeDiff > 5) {
-                timeLink.style.color = 'red'; // Set time to red if out of sync
-            } else {
-                timeLink.style.color = 'black'; // Default color if in sync
-            }
+        const memPercent = memTotal ? Math.round(((memTotal - memUsed) / memTotal) * 100) : 0;
+        timeLink.textContent = `${timeStr} (Browser time) ${memPercent}% memory free`;
+
+        const clientTime = new Date();
+        const timeDiff = Math.abs(clientTime - date) / 1000;
+        timeLink.style.color = timeDiff > 5 ? 'red' : 'black';
+    }
+
+    function showSyncOverlay() {
+        if (latestData.epoch) {
+            const date = new Date(latestData.epoch * 1000);
+            const timeStr = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')} ${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}:${String(date.getSeconds()).padStart(2, '0')}`;
+            document.getElementById('serverTime').textContent = timeStr;
+        } else {
+            document.getElementById('serverTime').textContent = 'N/A';
         }
+        document.getElementById('heapUsed').textContent = latestData.mem_used ? (latestData.mem_used / 1024).toFixed(2) : 'N/A';
+        document.getElementById('heapTotal').textContent = latestData.mem_total ? (latestData.mem_total / 1024).toFixed(2) : 'N/A';
+        document.getElementById('syncOverlay').style.display = 'block';
+    }
 
-        // Show the sync overlay
-        function showSyncOverlay() {
-            document.getElementById('syncOverlay').style.display = 'block';
-        }
+    function hideSyncOverlay() { 
+        document.getElementById('syncOverlay').style.display = 'none'; 
+    }
 
-        // Hide the sync overlay
-        function hideSyncOverlay() {
-            document.getElementById('syncOverlay').style.display = 'none';
-        }
+    function syncTimeAndTimezone() {
+        const clientTime = new Date();
+        const year = clientTime.getFullYear();
+        const month = String(clientTime.getMonth() + 1).padStart(2, '0');
+        const day = String(clientTime.getDate()).padStart(2, '0');
+        const hours = String(clientTime.getHours()).padStart(2, '0');
+        const minutes = String(clientTime.getMinutes()).padStart(2, '0');
+        const seconds = String(clientTime.getSeconds()).padStart(2, '0');
+        const timeStr = `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
+        const offset = -clientTime.getTimezoneOffset() / 60;
+        const offsetStr = (offset >= 0 ? "+" : "") + offset;
 
-        // Sync local time and timezone to server
-        function syncTimeAndTimezone() {
-            const clientTime = new Date();
-            const year = clientTime.getFullYear();
-            const month = String(clientTime.getMonth() + 1).padStart(2, '0');
-            const day = String(clientTime.getDate()).padStart(2, '0');
-            const hours = String(clientTime.getHours()).padStart(2, '0');
-            const minutes = String(clientTime.getMinutes()).padStart(2, '0');
-            const seconds = String(clientTime.getSeconds()).padStart(2, '0');
-            const timeStr = `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
-            const posixTz = "AEST-10"; // Adjust to your POSIX timezone
-
-            const message = { 
-                command: 'sync_time', 
-                time: timeStr, 
-                tz: posixTz 
-            };
+        const message = { 
+            command: 'sync_time', 
+            time: timeStr,
+            offset: offsetStr
+        };
+        if (ws.readyState === WebSocket.OPEN) {
             ws.send(JSON.stringify(message));
             console.log('Sent to server:', message);
-            alert('Sent time: ' + timeStr + ' and timezone: ' + posixTz + ' to server.');
+            alert('Sent time: ' + timeStr + ' and offset: ' + offsetStr + ' to server.');
             hideSyncOverlay();
+        } else {
+            alert('Cannot sync time: WebSocket is not connected.');
         }
+    }
 
-        // Handle window clicks to close overlay if clicking outside
-        window.onclick = function(event) {
-            const overlay = document.getElementById('syncOverlay');
-            if (event.target == overlay) {
-                hideSyncOverlay();
-            }
-        };
+    window.onclick = function(event) {
+        const overlay = document.getElementById('syncOverlay');
+        if (event.target == overlay) hideSyncOverlay();
+    };
     </script>
 </body>
 </html>

@@ -15,4 +15,5 @@
  - 0.0.11: only trigger NTP and internet checks from timer. 23 Feb 25
  - 0.0.12: Building top div on webpage. Remove blocking code. Optimise and debug NTP.
  - 0.0.13: Send time and TZ back to server over websocket.
- - 0.0.14: show TZ in webpage
+ - 0.0.14: Show TZ in webpage
+ - 0.0.15: Send memory in websocket, send data as json. Remove TZ from config, only use browser offset in client.
