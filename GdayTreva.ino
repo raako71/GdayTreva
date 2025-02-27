@@ -19,6 +19,8 @@ struct Config {
   char internet_check_host[32];  // Host to check for internet connectivity (e.g., "8.8.8.8")
 };
 
+static AsyncWebSocket ws("/ws", 2); // Max 2 clients
+
 Config config;  // Global configuration object
 static bool eth_connected = false;
 static bool wifi_connected = false;
@@ -351,6 +353,7 @@ void loop() {
     Serial.print(timeStr);
     Serial.print(" WiFi IP address: ");
     Serial.println(WiFi.localIP().toString());
+    Serial.println("Free heap: " + String(ESP.getFreeHeap()));
     print_time_count = millis();
   }
   if (shouldCheckInternet() == 1) {

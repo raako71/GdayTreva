@@ -18,3 +18,4 @@
  - 0.0.14: Show TZ in webpage
  - 0.0.15: Send memory in websocket, send data as json. Remove TZ from config, only use browser offset in client.
  - 0.0.16: HeartBeat timeout.
+ - 0.0.17: Print mem to serial. Max 2 websocket clients.
