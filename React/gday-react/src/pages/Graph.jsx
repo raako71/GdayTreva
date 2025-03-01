@@ -1,4 +1,5 @@
 function Graph() {
-    return <h1>Graph Page - Coming Soon</h1>;
-  }
-  export default Graph;
+  return <div>Graph Page</div>;
+}
+
+export default Graph;
