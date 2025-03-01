@@ -19,7 +19,7 @@ struct Config {
   char internet_check_host[32];  // Host to check for internet connectivity (e.g., "8.8.8.8")
 };
 
-static AsyncWebSocket ws("/ws", 2); // Max 2 clients
+
 
 Config config;  // Global configuration object
 static bool eth_connected = false;
@@ -34,7 +34,7 @@ static int internetCheckCount = 0;
 unsigned long print_time_count = 0;
 const unsigned long ONE_DAY_MS = 24 * 60 * 60 * 1000UL;
 unsigned long totalHeap = 0;
-
+  
 void networkEvent(arduino_event_id_t event) {
   switch (event) {
     case ARDUINO_EVENT_ETH_START:
@@ -118,23 +118,24 @@ void onWsEvent(AsyncWebSocket *server, AsyncWebSocketClient *client, AwsEventTyp
     case WS_EVT_DISCONNECT:
       Serial.printf("WebSocket client #%u disconnected\n", client->id());
       break;
-    case WS_EVT_DATA: {
-      Serial.printf("WebSocket client #%u sent data: %s\n", client->id(), (char *)data);
-      StaticJsonDocument<512> doc;
-      DeserializationError error = deserializeJson(doc, (char *)data, len);
-      if (!error) {
-        const char *command = doc["command"];
-        if (command && strcmp(command, "sync_time") == 0) {
-          const char *timeStr = doc["time"];
-          if (timeStr) {
-            setTimeFromClient(timeStr);
+    case WS_EVT_DATA:
+      {
+        Serial.printf("WebSocket client #%u sent data: %s\n", client->id(), (char *)data);
+        StaticJsonDocument<512> doc;
+        DeserializationError error = deserializeJson(doc, (char *)data, len);
+        if (!error) {
+          const char *command = doc["command"];
+          if (command && strcmp(command, "sync_time") == 0) {
+            const char *timeStr = doc["time"];
+            if (timeStr) {
+              setTimeFromClient(timeStr);
+            }
           }
+        } else {
+          Serial.println("Failed to parse WebSocket JSON: " + String(error.c_str()));
         }
-      } else {
-        Serial.println("Failed to parse WebSocket JSON: " + String(error.c_str()));
+        break;
       }
-      break;
-    }
     case WS_EVT_PONG:
     case WS_EVT_ERROR:
       break;
@@ -168,7 +169,7 @@ bool syncNTPTime() {
   if (!ntpConfigured && network_up) {
     Serial.println("Configuring NTP with server: " + String(config.ntp_server));
     if (config.ntp_server && strlen(config.ntp_server) > 0) {
-      configTime(0, 0, config.ntp_server); // UTC only
+      configTime(0, 0, config.ntp_server);  // UTC only
       Serial.println("configTime called with UTC");
       ntpConfigured = true;
     } else {
@@ -182,12 +183,13 @@ bool syncNTPTime() {
 void setTimeFromClient(const char *timeStr) {
   if (timeStr) {
     struct tm tm;
-    if (sscanf(timeStr, "%d-%d-%d %d:%d:%d", 
-               &tm.tm_year, &tm.tm_mon, &tm.tm_mday, 
-               &tm.tm_hour, &tm.tm_min, &tm.tm_sec) == 6) {
+    if (sscanf(timeStr, "%d-%d-%d %d:%d:%d",
+               &tm.tm_year, &tm.tm_mon, &tm.tm_mday,
+               &tm.tm_hour, &tm.tm_min, &tm.tm_sec)
+        == 6) {
       tm.tm_year -= 1900;
       tm.tm_mon -= 1;
-      tm.tm_isdst = -1; // No DST, UTC
+      tm.tm_isdst = -1;  // No DST, UTC
       time_t t = mktime(&tm);
       if (t != -1) {
         struct timeval tv = { .tv_sec = t, .tv_usec = 0 };
@@ -299,8 +301,6 @@ void setup() {
   totalHeap = ESP.getHeapSize();
   Serial.println("Total heap size: " + String(totalHeap) + " bytes");
   WiFi.onEvent(networkEvent);
-  ws.onEvent(onWsEvent);
-  server.addHandler(&ws);
   if (!LittleFS.begin(FORMAT_LITTLEFS_IF_FAILED)) {
     Serial.println("LittleFS Mount Failed");
     return;
@@ -341,6 +341,8 @@ void setup() {
       request->send(400, "text/plain", "Missing filename parameter");
     }
   });
+  ws.onEvent(onWsEvent);
+  server.addHandler(&ws);
   server.begin();
 }
 
@@ -348,7 +350,7 @@ void loop() {
   if (millis() - print_time_count >= 10000) {
     time_t now = time(nullptr);
     char timeStr[50];
-    strftime(timeStr, sizeof(timeStr), "%Y-%m-%d %H:%M:%S", gmtime(&now)); // UTC time
+    strftime(timeStr, sizeof(timeStr), "%Y-%m-%d %H:%M:%S", gmtime(&now));  // UTC time
     Serial.print("UTC Time: ");
     Serial.print(timeStr);
     Serial.print(" WiFi IP address: ");
