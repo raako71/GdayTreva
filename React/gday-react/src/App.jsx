@@ -6,12 +6,12 @@ import Graph from './pages/Graph';
 import './styles.css';
 
 function App() {
-  const [epoch, setEpoch] = useState(null);
+  const [message, setMessage] = useState(null); // Full message state
   const wsRef = useRef(null);
 
   useEffect(() => {
     let ws;
-    const wsServer = 'ws://192.168.1.10/ws'; // Hardcoded default
+    const wsServer = 'ws://192.168.1.10/ws';
 
     const connectWebSocket = () => {
       console.log(`Attempting to connect to ${wsServer}`);
@@ -24,10 +24,7 @@ function App() {
 
       ws.onmessage = (event) => {
         const data = JSON.parse(event.data);
-        if (data.epoch) {
-          setEpoch(data.epoch);
-          console.log(`Epoch received: ${data.epoch}`);
-        }
+        setMessage(data); // Store full message
       };
 
       ws.onclose = () => {
@@ -45,11 +42,11 @@ function App() {
     return () => {
       if (wsRef.current) wsRef.current.close();
     };
-  }, []); // Runs once on mount
+  }, []);
 
   return (
     <div className="App">
-      <TimeBar epoch={epoch} />
+      <TimeBar message={message} />
       <Routes>
         <Route path="/" element={<Home />} />
         <Route path="/graph" element={<Graph />} />

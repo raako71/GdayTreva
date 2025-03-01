@@ -1,1 +1,23 @@
-/* Minimal for now */
+.time-bar {
+  padding: 10px;
+  background-color: #171717;
+  text-align: center;
+  width: 100%;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction:row; /* Stack items vertically */
+  gap: 5px; /* Space between items */
+  position: fixed;
+  top: 0; /* Adjust if overlapping with other content */
+  left: 0;
+  z-index: 1000;
+}
+
+.time-bar > div {
+  margin: 0; /* Reset margins for flex */
+}
+
+.App {
+  padding-top: 60px; /* Clear the fixed time-bar */
+  color: #009a0a;
+}
