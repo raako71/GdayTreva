@@ -130,6 +130,8 @@ void onWsEvent(AsyncWebSocket *server, AsyncWebSocketClient *client, AwsEventTyp
             if (timeStr) {
               setTimeFromClient(timeStr);
             }
+          } else if (command && strcmp(command, "get_network_info") == 0) {
+            sendNetworkInfo(client); // Respond to network info request
           }
         } else {
           Serial.println("Failed to parse WebSocket JSON: " + String(error.c_str()));
@@ -140,6 +142,60 @@ void onWsEvent(AsyncWebSocket *server, AsyncWebSocketClient *client, AwsEventTyp
     case WS_EVT_ERROR:
       break;
   }
+}
+
+void sendTimeToClients() {
+  if (ws.count() > 0) {
+    time_t now = time(nullptr);
+    unsigned long freeHeap = ESP.getFreeHeap();
+    unsigned long usedHeap = totalHeap - freeHeap;
+
+    String json = "{";
+    json += "\"type\":\"time\",";
+    json += "\"epoch\":" + String(now) + ",";
+    json += "\"mem_used\":" + String(usedHeap) + ",";
+    json += "\"mem_total\":" + String(totalHeap);
+    json += "}";
+
+    ws.textAll(json);
+  }
+}
+
+void sendNetworkInfo(AsyncWebSocketClient *client) {
+  String wifi_ip = wifi_connected ? WiFi.localIP().toString() : "N/A";
+  String eth_ip = eth_connected ? ETH.localIP().toString() : "N/A";
+  String wifi_mac = wifi_connected ? WiFi.macAddress() : "N/A";
+  String eth_mac = eth_connected ? ETH.macAddress() : "N/A";
+  String wifi_gateway = wifi_connected ? WiFi.gatewayIP().toString() : "N/A";
+  String eth_gateway = eth_connected ? ETH.gatewayIP().toString() : "N/A";
+  String wifi_subnet = wifi_connected ? WiFi.subnetMask().toString() : "N/A";
+  String eth_subnet = eth_connected ? ETH.subnetMask().toString() : "N/A";
+  IPAddress wifi_dns = wifi_connected ? WiFi.dnsIP() : IPAddress(0, 0, 0, 0);
+  String wifi_dns_str = wifi_connected ? wifi_dns.toString() : "N/A";
+  IPAddress eth_dns = eth_connected ? ETH.dnsIP() : IPAddress(0, 0, 0, 0);
+  String eth_dns_str = eth_connected ? eth_dns.toString() : "N/A";
+  int32_t wifi_rssi = wifi_connected ? WiFi.RSSI() : 0;
+  String hostname = String(config.mdns_hostname) + ".local";
+
+  StaticJsonDocument<512> doc;
+  doc["type"] = "network_info";
+  doc["wifi_ip"] = wifi_ip;
+  doc["eth_ip"] = eth_ip;
+  doc["wifi_mac"] = wifi_mac;
+  doc["eth_mac"] = eth_mac;
+  doc["wifi_gateway"] = wifi_gateway;
+  doc["eth_gateway"] = eth_gateway;
+  doc["wifi_subnet"] = wifi_subnet;
+  doc["eth_subnet"] = eth_subnet;
+  doc["wifi_dns"] = wifi_dns_str;
+  doc["eth_dns"] = eth_dns_str;
+  doc["mdns_hostname"] = hostname;
+  doc["wifi_rssi"] = wifi_rssi;
+
+  String json;
+  serializeJson(doc, json);
+  client->text(json);
+  Serial.println("Sent network info: " + json);
 }
 
 bool checkInternetConnectivity() {
@@ -212,16 +268,6 @@ int shouldCheckInternet() {
     }
   }
   return 0;
-}
-
-void sendTimeToClients() {
-  if (ws.count() > 0) {
-    time_t now = time(nullptr);
-    unsigned long freeHeap = ESP.getFreeHeap();
-    unsigned long usedHeap = totalHeap - freeHeap;
-    String json = "{\"epoch\":" + String(now) + ",\"mem_used\":" + String(usedHeap) + ",\"mem_total\":" + String(totalHeap) + "}";
-    ws.textAll(json);
-  }
 }
 
 void writeFile(const char *path, const char *message) {

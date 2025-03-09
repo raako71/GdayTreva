@@ -19,4 +19,5 @@
  - 0.0.15: Send memory in websocket, send data as json. Remove TZ from config, only use browser offset in client.
  - 0.0.16: HeartBeat timeout.
  - 0.0.17: Print mem to serial.
- - 0.0.18: Formatting
+ - 0.0.18: Formatting.
+ - 0.0.19: Show Eth info on settings page.
