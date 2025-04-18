@@ -21,3 +21,4 @@
  - 0.0.17: Print mem to serial.
  - 0.0.18: Formatting.
  - 0.0.19: Show Eth info on settings page.
+ - 0.0.20: NTP Check.

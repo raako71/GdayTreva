@@ -97,7 +97,7 @@ void networkEvent(arduino_event_id_t event) {
       }
       break;
     case ARDUINO_EVENT_WIFI_STA_DISCONNECTED:
-      Serial.println("\nWiFi disconnected.");
+      if(wifi_connected) Serial.println("\nWiFi disconnected.");
       wifi_connected = false;
       network_up = eth_connected || wifi_connected;
       if (!network_up) {
@@ -225,17 +225,25 @@ bool syncNTPTime() {
   if (!ntpConfigured && network_up) {
     Serial.println("Configuring NTP with server: " + String(config.ntp_server));
     if (config.ntp_server && strlen(config.ntp_server) > 0) {
-      configTime(0, 0, config.ntp_server);  // UTC only
-      Serial.println("configTime called with UTC");
+      configTime(0, 0, config.ntp_server);
       ntpConfigured = true;
+      // Test NTP server reachability
+      WiFiUDP udp;
+      udp.begin(123);
+      if (udp.beginPacket(config.ntp_server, 123)) {
+        Serial.println("NTP server reachable");
+        udp.endPacket();
+      } else {
+        Serial.println("Failed to reach NTP server");
+      }
+      udp.stop();
     } else {
       Serial.println("NTP server invalid, skipping");
       return false;
     }
   }
-  return false;
+  return ntpConfigured;
 }
-
 void setTimeFromClient(const char *timeStr) {
   if (timeStr) {
     struct tm tm;
@@ -391,8 +399,20 @@ void setup() {
   server.addHandler(&ws);
   server.begin();
 }
+bool isTimeSynced() {
+  time_t now = time(nullptr);
+  return now > 946684800; // After Jan 1, 2000
+}
 
 void loop() {
+  static unsigned long lastNTPSyncCheck = 0;
+  if (millis() - lastNTPSyncCheck >= 30000 && network_up) {
+    if (!isTimeSynced()) {
+      Serial.println("NTP sync failed, retrying...");
+      syncNTPTime(); // Retry NTP sync
+    }
+    lastNTPSyncCheck = millis();
+  }
   if (millis() - print_time_count >= 10000) {
     time_t now = time(nullptr);
     char timeStr[50];
