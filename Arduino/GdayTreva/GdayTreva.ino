@@ -1,3 +1,4 @@
+//[Ctrl] + [Shift] + [P], then "Upload LittleFS to Pico/ESP8266/ESP32".
 #include <ETH.h>
 #include <WiFi.h>
 #include <Arduino.h>
@@ -368,6 +369,22 @@ void setup() {
   }
   WIFI_Connect();
   server.serveStatic("/", LittleFS, "/").setDefaultFile("index.html");
+
+  server.onNotFound([](AsyncWebServerRequest *request) {
+    // Ignore requests for static assets (e.g., /assets/*)
+    if (request->url().startsWith("/assets/")) {
+      request->send(404, "text/plain", "Asset not found");
+      return;
+    }
+    // Serve index.html for all other routes
+    if (LittleFS.exists("/index.html")) {
+      request->send(LittleFS, "/index.html", "text/html");
+    } else {
+      request->send(404, "text/plain", "Index file not found");
+    }
+  });
+
+  
   server.on("/getFile", HTTP_GET, [](AsyncWebServerRequest *request) {
     if (request->hasParam("filename")) {
       String filename = request->getParam("filename")->value();
