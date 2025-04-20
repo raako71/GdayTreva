@@ -1,3 +1,26 @@
+:root {
+  font-family: system-ui, Avenir, Helvetica, Arial, sans-serif;
+  line-height: 1.5;
+  font-weight: 400;
+
+  color-scheme: light dark;
+  color: rgba(255, 255, 255, 0.87);
+  background-color: #242424;
+
+  text-rendering: optimizeLegibility;
+}
+
+.App {
+  padding-top: 30px; /* Clear the fixed time-bar */
+  color: #009a0a;
+}
+
+.Title {
+  margin: auto;
+  width: 100%;
+  text-align: center;
+}
+
 .time-bar {
   padding: 10px;
   background-color: #171717;
@@ -17,7 +40,16 @@
   margin: 0; /* Reset margins for flex */
 }
 
-.App {
-  padding-top: 60px; /* Clear the fixed time-bar */
-  color: #009a0a;
+.Tile {
+  border: #009a0a;
+  border-style: solid;
+  padding: 10px;
+  min-width: 100px;
+  width: fit-content;
+  border-radius: 10px;
+}
+
+.Tile-container {
+  display: flex;
+  justify-content: center; /* Horizontally centers the tile */
 }
