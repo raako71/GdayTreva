@@ -4,6 +4,9 @@ import TimeBar from './pages/TimeBar';
 import Home from './pages/Home';
 import Graph from './pages/Graph';
 import Settings from './pages/Settings';
+import Programs from './pages/Programs';
+import ProgramEditor from './pages/ProgramEditor';
+
 import './styles.css';
 
 function App() {
@@ -134,6 +137,8 @@ function App() {
         <Route path="/" element={<Home />} />
         <Route path="/graph" element={<Graph />} />
         <Route path="/settings" element={<Settings requestNetworkInfo={requestNetworkInfo} networkInfo={networkInfo} connectionStatus={connectionStatus} />} />
+        <Route path="/programs" element={<Programs />} />
+        <Route path="/programEditor" element={<ProgramEditor />} />
       </Routes>
     </div>
   );
