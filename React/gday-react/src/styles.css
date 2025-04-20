@@ -28,12 +28,53 @@
   width: 100%;
   box-sizing: border-box;
   display: flex;
-  flex-direction:row; /* Stack items vertically */
-  gap: 5px; /* Space between items */
+  flex-direction: row;
+  align-items: center; /* Vertically center items */
+  gap: 5px;
   position: fixed;
-  top: 0; /* Adjust if overlapping with other content */
+  top: 0;
   left: 0;
   z-index: 1000;
+}
+
+.hamburger {
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 8px;
+  display: flex; /* Ensure button is visible in flex context */
+  align-items: center;
+  margin-left: auto; /* Reinforce right justification */
+}
+
+.hamburger svg {
+  width: 24px; /* Ensure icon is visible */
+  height: 24px;
+  stroke: white; /* Explicitly set stroke color for visibility */
+}
+
+.menu {
+  position: absolute;
+  top: 100%; /* Places menu directly below time-bar */
+  right: 0;
+  background-color: #1f2937; /* Matches Tailwind bg-gray-800 */
+  color: white;
+  width: 12rem; /* Matches Tailwind w-48 */
+  box-shadow: 0 10px 15px rgba(0, 0, 0, 0.2); /* Matches Tailwind shadow-lg */
+  display: flex;
+  flex-direction: column;
+  z-index: 1000;
+}
+
+.menu a {
+  display: block;
+  padding: 0.5rem 1rem; /* Matches Tailwind px-4 py-2 */
+  color: white;
+  text-decoration: none;
+}
+
+.menu a:hover {
+  background-color: #374151; /* Matches Tailwind hover:bg-gray-700 */
 }
 
 .time-bar > div {
