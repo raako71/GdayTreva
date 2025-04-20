@@ -42,39 +42,39 @@
   border: none;
   cursor: pointer;
   padding: 8px;
-  display: flex; /* Ensure button is visible in flex context */
+  display: flex;
   align-items: center;
-  margin-left: auto; /* Reinforce right justification */
+  margin-left: auto; /* Ensure right justification */
 }
 
-.hamburger svg {
-  width: 24px; /* Ensure icon is visible */
+.hamburger-icon {
+  width: 24px; /* Visible size */
   height: 24px;
-  stroke: white; /* Explicitly set stroke color for visibility */
+  stroke: white; /* White icon for contrast */
 }
 
 .menu {
   position: absolute;
-  top: 100%; /* Places menu directly below time-bar */
-  right: 0;
-  background-color: #1f2937; /* Matches Tailwind bg-gray-800 */
+  top: 100%; /* Drop below time-bar */
+  right: 0; /* Align to right edge */
+  background-color: #2a2a2a; /* Dark background similar to time-bar */
   color: white;
-  width: 12rem; /* Matches Tailwind w-48 */
-  box-shadow: 0 10px 15px rgba(0, 0, 0, 0.2); /* Matches Tailwind shadow-lg */
+  width: 192px; /* Fixed width for menu */
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3); /* Subtle shadow */
   display: flex;
   flex-direction: column;
   z-index: 1000;
 }
 
-.menu a {
+.menu-item {
   display: block;
-  padding: 0.5rem 1rem; /* Matches Tailwind px-4 py-2 */
+  padding: 8px 16px;
   color: white;
   text-decoration: none;
 }
 
-.menu a:hover {
-  background-color: #374151; /* Matches Tailwind hover:bg-gray-700 */
+.menu-item:hover {
+  background-color: #3a3a3a; /* Hover effect */
 }
 
 .time-bar > div {

@@ -25,12 +25,12 @@ function TimeBar({ message }) {
       <div>-</div>
       <div>Memory Free: {memPercent}%</div>
       <button
-        className="hamburger ml-auto p-2 focus:outline-none"
+        className="hamburger"
         onClick={toggleMenu}
         aria-label="Toggle navigation menu"
       >
         <svg
-          className="w-6 h-6 text-white"
+          className="hamburger-icon"
           fill="none"
           stroke="currentColor"
           viewBox="0 0 24 24"
@@ -45,27 +45,34 @@ function TimeBar({ message }) {
         </svg>
       </button>
       {isMenuOpen && (
-        <div className="menu absolute top-full right-0 bg-gray-800 text-white w-48 shadow-lg">
+        <div className="menu">
           <Link
             to="/"
-            className="block px-4 py-2 hover:bg-gray-700"
+            className="menu-item"
             onClick={() => setIsMenuOpen(false)}
           >
             Home
           </Link>
           <Link
             to="/settings"
-            className="block px-4 py-2 hover:bg-gray-700"
+            className="menu-item"
             onClick={() => setIsMenuOpen(false)}
           >
             Settings
           </Link>
           <Link
             to="/graph"
-            className="block px-4 py-2 hover:bg-gray-700"
+            className="menu-item"
             onClick={() => setIsMenuOpen(false)}
           >
             Graph
+          </Link>
+          <Link
+            to="/programs"
+            className="menu-item"
+            onClick={() => setIsMenuOpen(false)}
+          >
+            Programs
           </Link>
         </div>
       )}
