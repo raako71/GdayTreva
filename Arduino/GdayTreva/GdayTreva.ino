@@ -587,8 +587,8 @@ void loop() {
     Serial.print("UTC Time: ");
     Serial.print(timeStr);
     Serial.print(" WiFi IP address: ");
-    Serial.println(WiFi.localIP().toString());
-    Serial.println("Free heap: " + String(ESP.getFreeHeap()));
+    Serial.print(WiFi.localIP().toString());
+    Serial.println(" Free heap: " + String(ESP.getFreeHeap()));
     print_time_count = millis();
   }
   if (shouldCheckInternet() == 1) {
