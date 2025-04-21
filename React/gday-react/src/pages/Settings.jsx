@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import PropTypes from 'prop-types';
 import '../styles.css';
 
 function Settings({ requestNetworkInfo, networkInfo, connectionStatus }) {
@@ -29,10 +30,12 @@ function Settings({ requestNetworkInfo, networkInfo, connectionStatus }) {
       <div className="Tile-container">
         <div className="Tile">
           <h2>Network Settings</h2>
-          <button onClick={() => {
-            console.log('Manual refresh - requesting network info');
-            requestNetworkInfo();
-          }}>
+          <button
+            onClick={() => {
+              console.log('Manual refresh - requesting network info');
+              requestNetworkInfo();
+            }}
+          >
             Refresh Network Info
           </button>
           {isWaitingForData && connectionStatus !== 'Connected' ? (
@@ -42,7 +45,10 @@ function Settings({ requestNetworkInfo, networkInfo, connectionStatus }) {
               {networkInfo.wifi_ip !== 'N/A' && (
                 <>
                   <div>WiFi IP: {networkInfo.wifi_ip}</div>
-                  <div>WiFi RSSI: {networkInfo.wifi_rssi !== 0 ? `${networkInfo.wifi_rssi} dBm` : 'N/A'}</div>
+                  <div>
+                    WiFi RSSI:{' '}
+                    {networkInfo.wifi_rssi !== 0 ? `${networkInfo.wifi_rssi} dBm` : 'N/A'}
+                  </div>
                 </>
               )}
               {networkInfo.eth_ip !== 'N/A' && <div>ETH IP: {networkInfo.eth_ip}</div>}
@@ -71,5 +77,24 @@ function Settings({ requestNetworkInfo, networkInfo, connectionStatus }) {
     </div>
   );
 }
+
+Settings.propTypes = {
+  requestNetworkInfo: PropTypes.func.isRequired,
+  connectionStatus: PropTypes.string.isRequired,
+  networkInfo: PropTypes.shape({
+    wifi_ip: PropTypes.string,
+    wifi_rssi: PropTypes.number,
+    eth_ip: PropTypes.string,
+    wifi_mac: PropTypes.string,
+    wifi_gateway: PropTypes.string,
+    wifi_subnet: PropTypes.string,
+    wifi_dns: PropTypes.string,
+    eth_mac: PropTypes.string,
+    eth_gateway: PropTypes.string,
+    eth_subnet: PropTypes.string,
+    eth_dns: PropTypes.string,
+    mdns_hostname: PropTypes.string,
+  }),
+};
 
 export default Settings;

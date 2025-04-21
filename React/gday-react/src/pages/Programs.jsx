@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
+import PropTypes from 'prop-types';
 import '../styles.css';
 
 function Programs({ wsRef, isWsReady }) {
@@ -35,8 +36,14 @@ function Programs({ wsRef, isWsReady }) {
     };
 
     wsRef.current.addEventListener('message', handleMessage);
+
+    // Capture wsRef.current for cleanup
+    const currentWs = wsRef.current;
+
     return () => {
-      wsRef.current.removeEventListener('message', handleMessage);
+      if (currentWs) {
+        currentWs.removeEventListener('message', handleMessage);
+      }
     };
   }, [isWsReady, wsRef]);
 
@@ -81,5 +88,12 @@ function Programs({ wsRef, isWsReady }) {
     </div>
   );
 }
+
+Programs.propTypes = {
+  isWsReady: PropTypes.bool.isRequired,
+  wsRef: PropTypes.shape({
+    current: PropTypes.instanceOf(WebSocket),
+  }).isRequired,
+};
 
 export default Programs;
