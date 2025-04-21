@@ -6,7 +6,6 @@ import Graph from './pages/Graph';
 import Settings from './pages/Settings';
 import Programs from './pages/Programs';
 import ProgramEditor from './pages/ProgramEditor';
-
 import './styles.css';
 
 function App() {
@@ -14,6 +13,7 @@ function App() {
   const [networkInfo, setNetworkInfo] = useState(null);
   const [connectionStatus, setConnectionStatus] = useState('Attempting to connect...');
   const [lastError, setLastError] = useState(null);
+  const [isWsReady, setIsWsReady] = useState(false); // Added state to track WebSocket readiness
   const wsRef = useRef(null);
   const [wsServer, setWsServer] = useState(null);
 
@@ -40,7 +40,7 @@ function App() {
         }
         setWsServer(`ws://${hostname}.local/ws`);
       } catch (error) {
-        console.error('Error fetching config:', error);
+        console.error('Error fetching config, using default.', error);
         setWsServer(`ws://gday.local/ws`);
       }
     };
@@ -70,6 +70,7 @@ function App() {
           console.log('WebSocket connection opened');
           setConnectionStatus('Connected');
           setLastError(null);
+          setIsWsReady(true); // Set WebSocket readiness
           retryDelay = 1000;
         }
       };
@@ -93,8 +94,8 @@ function App() {
                 console.log('Save program response:', data);
                 break;
               case 'get_program_response':
-                  console.log('Get program response:', data);
-                  break;
+                console.log('Get program response:', data);
+                break;
               default:
                 console.warn('Unknown message type:', data.type);
             }
@@ -108,6 +109,7 @@ function App() {
         if (isMounted) {
           console.log('WebSocket connection closed');
           setConnectionStatus('Disconnected');
+          setIsWsReady(false); // Reset WebSocket readiness
           reconnectTimeout = setTimeout(() => {
             connectWebSocket();
             retryDelay = Math.min(retryDelay * 2, 30000);
@@ -120,6 +122,7 @@ function App() {
           console.error('WebSocket error:', error);
           setConnectionStatus('Connection failed - verify gday.local');
           setLastError('Connection failed - verify gday.local');
+          setIsWsReady(false); // Reset on error
           ws.close();
         }
       };
@@ -136,16 +139,15 @@ function App() {
 
   return (
     <div className="App">
-      <TimeBar message={message}/>
+      <TimeBar message={message} />
       <Routes>
         <Route path="/" element={<Home />} />
         <Route path="/graph" element={<Graph />} />
         <Route path="/settings" element={<Settings requestNetworkInfo={requestNetworkInfo} networkInfo={networkInfo} connectionStatus={connectionStatus} />} />
         <Route path="/programs" element={<Programs />} />
-        <Route path="/programEditor" element={<ProgramEditor wsRef={wsRef} />} />
+        <Route path="/programEditor" element={<ProgramEditor wsRef={wsRef} isWsReady={isWsReady} />} />
       </Routes>
     </div>
   );
 }
-
 export default App;
