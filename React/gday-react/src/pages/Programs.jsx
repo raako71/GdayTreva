@@ -43,35 +43,40 @@ function Programs({ wsRef, isWsReady }) {
   return (
     <div>
       <div className="Title">
-      <h1 >Programs</h1>
+        <h1 >Programs</h1>
       </div>
       <div className="Tile-container">
-      <table className="Tile">
-        <thead>
-          <tr>
-            <th>Program Name</th>
-          </tr>
-        </thead>
-        <tbody>
-          {programs.length === 0 ? (
+        <table className="Tile">
+          <thead>
             <tr>
-              <td>No programs found</td>
+              <th>Program Name</th>
             </tr>
-          ) : (
-            programs.map((program) => (
-              <tr key={program.id}>
-                <td>
-                  <Link
-                    to={`/programEditor?programID=${program.id}`}
-                  >
-                    {program.name || `Program${program.id}`}
-                  </Link>
-                </td>
+          </thead>
+          <tbody>
+            {programs.length === 0 ? (
+              <tr>
+                <td>No programs found</td>
               </tr>
-            ))
-          )}
-        </tbody>
-      </table>
+            ) : (
+              programs.map((program) => (
+                <tr key={program.id}>
+                  <td>
+                    <Link
+                      to={`/programEditor?programID=${program.id}`}
+                    >
+                      {program.name || `Program${program.id}`}
+                    </Link>
+                  </td>
+                </tr>
+              ))
+            )}
+          </tbody>
+          <Link
+            to={`/programEditor`}
+          >
+            {`New Program`}
+          </Link>
+        </table>
       </div>
     </div>
   );
