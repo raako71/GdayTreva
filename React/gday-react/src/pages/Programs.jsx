@@ -41,26 +41,28 @@ function Programs({ wsRef, isWsReady }) {
   }, [isWsReady, wsRef]);
 
   return (
-    <div className="container mx-auto p-4">
-      <h1 className="text-2xl font-bold mb-4">Programs</h1>
-      <table className="table-auto w-full border-collapse border border-gray-300">
+    <div>
+      <div className="Title">
+      <h1 >Programs</h1>
+      </div>
+      <div className="Tile-container">
+      <table className="Tile">
         <thead>
-          <tr className="bg-gray-100">
-            <th className="border border-gray-300 p-2">Program Name</th>
+          <tr>
+            <th>Program Name</th>
           </tr>
         </thead>
         <tbody>
           {programs.length === 0 ? (
             <tr>
-              <td className="border border-gray-300 p-2 text-center">No programs found</td>
+              <td>No programs found</td>
             </tr>
           ) : (
             programs.map((program) => (
-              <tr key={program.id} className="hover:bg-gray-50">
-                <td className="border border-gray-300 p-2">
+              <tr key={program.id}>
+                <td>
                   <Link
                     to={`/programEditor?programID=${program.id}`}
-                    className="text-blue-500 hover:underline"
                   >
                     {program.name || `Program${program.id}`}
                   </Link>
@@ -70,6 +72,7 @@ function Programs({ wsRef, isWsReady }) {
           )}
         </tbody>
       </table>
+      </div>
     </div>
   );
 }

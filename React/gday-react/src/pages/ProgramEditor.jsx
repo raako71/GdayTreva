@@ -112,10 +112,10 @@ function ProgramEditor({ wsRef, isWsReady }) {
   };
 
   return (
-    <div className="container mx-auto p-4">
-      <h1 className="text-2xl font-bold mb-4">Program Editor</h1>
-      {error && <div className="text-red-500 mb-4">{error}</div>}
-      {status && <div className="text-green-500 mb-4">{status}</div>}
+    <div>
+      <h1 className="Title">Program Editor</h1>
+      {error && <div>{error}</div>}
+      {status && <div>{status}</div>}
       <textarea
         className="w-full h-64 p-2 border rounded mb-4"
         value={programContent}

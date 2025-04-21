@@ -11,7 +11,7 @@
 }
 
 .App {
-  padding-top: 30px; /* Clear the fixed time-bar */
+  padding-top: 40px; /* Clear the fixed time-bar */
   color: #009a0a;
 }
 
@@ -22,7 +22,7 @@
 }
 
 .time-bar {
-  padding: 10px;
+  padding: 5px;
   background-color: #171717;
   text-align: center;
   width: 100%;
@@ -93,4 +93,28 @@
 .Tile-container {
   display: flex;
   justify-content: center; /* Horizontally centers the tile */
+}
+
+/* unvisited link */
+a:link {
+  color: #1893ff;
+}
+
+/* visited link */
+a:visited {
+  color: #1893ff;
+}
+
+/* mouse over link */
+a:hover {
+  color:#fff;
+}
+
+/* selected link */
+a:active {
+  color: blue;
+}
+
+table {
+  text-align: center;
 }
