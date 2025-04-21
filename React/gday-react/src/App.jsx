@@ -28,22 +28,20 @@ function App() {
   useEffect(() => {
     const fetchConfig = async () => {
       try {
-        // Use window.location.host to dynamically get the ESP32's address
         const response = await fetch(`http://${window.location.host}/config.json`);
         if (!response.ok) {
-          throw new Error('Failed to fetch config.json');
+          setWsServer(`ws://gday.local/ws`);
+          throw new Error('no config file, default hostname being used');
         }
         const config = await response.json();
         const hostname = config.mdns_hostname;
         if (!hostname) {
           throw new Error('mdns_hostname not found in config.json');
         }
-        // Set WebSocket URL (e.g., ws://gday.local/ws)
         setWsServer(`ws://${hostname}.local/ws`);
       } catch (error) {
         console.error('Error fetching config:', error);
-        // Fallback to IP address
-        setWsServer(`ws://${window.location.hostname}/ws`);
+        setWsServer(`ws://gday.local/ws`);
       }
     };
 
@@ -72,7 +70,7 @@ function App() {
           console.log('WebSocket connection opened');
           setConnectionStatus('Connected');
           setLastError(null);
-          retryDelay = 1000; // Reset retry delay
+          retryDelay = 1000;
         }
       };
 
@@ -91,6 +89,12 @@ function App() {
               case 'network_info':
                 setNetworkInfo(data);
                 break;
+              case 'save_program_response':
+                console.log('Save program response:', data);
+                break;
+              case 'get_program_response':
+                  console.log('Get program response:', data);
+                  break;
               default:
                 console.warn('Unknown message type:', data.type);
             }
@@ -106,7 +110,7 @@ function App() {
           setConnectionStatus('Disconnected');
           reconnectTimeout = setTimeout(() => {
             connectWebSocket();
-            retryDelay = Math.min(retryDelay * 2, 30000); // Max 30s
+            retryDelay = Math.min(retryDelay * 2, 30000);
           }, retryDelay);
         }
       };
@@ -132,13 +136,13 @@ function App() {
 
   return (
     <div className="App">
-      <TimeBar message={message} connectionStatus={connectionStatus} lastError={lastError} />
+      <TimeBar message={message}/>
       <Routes>
         <Route path="/" element={<Home />} />
         <Route path="/graph" element={<Graph />} />
         <Route path="/settings" element={<Settings requestNetworkInfo={requestNetworkInfo} networkInfo={networkInfo} connectionStatus={connectionStatus} />} />
         <Route path="/programs" element={<Programs />} />
-        <Route path="/programEditor" element={<ProgramEditor />} />
+        <Route path="/programEditor" element={<ProgramEditor wsRef={wsRef} />} />
       </Routes>
     </div>
   );
