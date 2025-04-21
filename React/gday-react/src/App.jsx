@@ -94,7 +94,7 @@ function App() {
                 console.log('Save program response:', data);
                 break;
               case 'get_program_response':
-                console.log('Get program response:', data);
+                //console.log('Get program response:', data);
                 break;
               default:
                 console.warn('Unknown message type:', data.type);
@@ -144,7 +144,7 @@ function App() {
         <Route path="/" element={<Home />} />
         <Route path="/graph" element={<Graph />} />
         <Route path="/settings" element={<Settings requestNetworkInfo={requestNetworkInfo} networkInfo={networkInfo} connectionStatus={connectionStatus} />} />
-        <Route path="/programs" element={<Programs />} />
+        <Route path="/programs" element={<Programs wsRef={wsRef} isWsReady={isWsReady}/>} />
         <Route path="/programEditor" element={<ProgramEditor wsRef={wsRef} isWsReady={isWsReady} />} />
       </Routes>
     </div>

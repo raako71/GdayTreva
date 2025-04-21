@@ -1,5 +1,5 @@
-import { useState, useEffect } from 'react';
-import { useLocation } from 'react-router-dom';
+import { useState, useEffect, useRef } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import '../styles.css';
 
 function ProgramEditor({ wsRef, isWsReady }) {
@@ -8,6 +8,8 @@ function ProgramEditor({ wsRef, isWsReady }) {
   const [error, setError] = useState(null);
   const [status, setStatus] = useState('');
   const location = useLocation();
+  const navigate = useNavigate();
+  const hasFetched = useRef(false);
 
   // Parse URL for programID on mount
   useEffect(() => {
@@ -18,6 +20,7 @@ function ProgramEditor({ wsRef, isWsReady }) {
       if (!isNaN(parsedID) && parsedID >= 1 && parsedID <= 10) {
         const formattedID = parsedID.toString().padStart(2, '0');
         setProgramID(formattedID);
+        hasFetched.current = false; // Reset to allow fetch for new URL ID
       } else {
         setError('Invalid programID in URL (must be 1 to 10)');
       }
@@ -26,29 +29,21 @@ function ProgramEditor({ wsRef, isWsReady }) {
 
   // Fetch program when WebSocket is ready and programID is set
   useEffect(() => {
-    //console.log('ProgramEditor: useEffect triggered, isWsReady:', isWsReady, 'programID:', programID);
-    if (!isWsReady || !programID || programID === '00') {
-      //console.log('ProgramEditor: Skipping fetch, conditions not met');
-      return;
-    }
-    //console.log('ProgramEditor: Sending get_program request for ID:', programID);
+    if (!isWsReady || !programID || programID === '00' || hasFetched.current) return;
+
     wsRef.current.send(JSON.stringify({ command: 'get_program', programID }));
     setStatus(`Requesting program ${programID}`);
+    hasFetched.current = true;
   }, [isWsReady, programID, wsRef]);
 
   // Handle WebSocket messages
   useEffect(() => {
-    if (!wsRef.current) {
-      //console.log('ProgramEditor: WebSocket not initialized for message handler');
-      return;
-    }
-  
+    if (!wsRef.current) return;
+
     const handleMessage = (event) => {
-      //console.log('ProgramEditor: Received WebSocket message:', event.data);
       try {
         const data = JSON.parse(event.data);
         if (data.type === 'get_program_response') {
-          //console.log('ProgramEditor: Processing get_program_response:', data);
           if (data.success) {
             setProgramContent(JSON.stringify(JSON.parse(data.content), null, 2));
             setStatus(`Loaded program ${data.programID}`);
@@ -58,30 +53,27 @@ function ProgramEditor({ wsRef, isWsReady }) {
             setStatus('');
           }
         } else if (data.type === 'save_program_response') {
-          console.log('ProgramEditor: Processing save_program_response:', data);
           if (data.success) {
             const assignedID = data.programID || programID;
             setProgramID(assignedID);
             setStatus(`Program ${assignedID} saved successfully`);
             setError(null);
+            navigate(`/programEditor?programID=${assignedID}`);
           } else {
             setError(`Failed to save program: ${data.message}`);
             setStatus('');
           }
         }
       } catch (err) {
-        console.error('ProgramEditor: Failed to parse WebSocket message:', err);
         setError('Error processing server response');
       }
     };
-  
-    //console.log('ProgramEditor: Adding WebSocket message listener');
+
     wsRef.current.addEventListener('message', handleMessage);
     return () => {
-      console.log('ProgramEditor: Removing WebSocket message listener');
       wsRef.current.removeEventListener('message', handleMessage);
     };
-  }, [wsRef, isWsReady]);
+  }, [wsRef, isWsReady, programID, navigate]);
 
   // Sanitize and save the program via WebSocket
   const saveProgram = async () => {

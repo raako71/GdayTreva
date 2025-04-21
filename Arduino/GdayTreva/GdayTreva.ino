@@ -35,7 +35,8 @@ static int internetCheckCount = 0;
 unsigned long print_time_count = 0;
 const unsigned long ONE_DAY_MS = 24 * 60 * 60 * 1000UL;
 unsigned long totalHeap = 0;
-  
+int numPrograms = 10;
+
 void networkEvent(arduino_event_id_t event) {
   switch (event) {
     case ARDUINO_EVENT_ETH_START:
@@ -50,6 +51,8 @@ void networkEvent(arduino_event_id_t event) {
       Serial.println("Ethernet IP: " + ETH.localIP().toString());
       eth_connected = true;
       network_up = true;
+      //WiFi.disconnect();  // Disconnect WiFi to prioritize Ethernet
+      //wifi_connected = false;
       checkInternetConnectivity();
       syncNTPTime();
       if (!MDNS.begin(config.mdns_hostname)) {
@@ -98,7 +101,7 @@ void networkEvent(arduino_event_id_t event) {
       }
       break;
     case ARDUINO_EVENT_WIFI_STA_DISCONNECTED:
-      if(wifi_connected) Serial.println("\nWiFi disconnected.");
+      if (wifi_connected) Serial.println("\nWiFi disconnected.");
       wifi_connected = false;
       network_up = eth_connected || wifi_connected;
       if (!network_up) {
@@ -132,7 +135,13 @@ void onWsEvent(AsyncWebSocket *server, AsyncWebSocketClient *client, AwsEventTyp
               setTimeFromClient(timeStr);
             }
           } else if (command && strcmp(command, "get_network_info") == 0) {
-            sendNetworkInfo(client); // Respond to network info request
+            sendNetworkInfo(client);
+          } else if (command && strcmp(command, "save_program") == 0) {
+            handleSaveProgram(client, doc);
+          } else if (strcmp(command, "get_program") == 0) {
+            const char *programID = doc["programID"];
+            if (programID) handleGetProgram(client, programID);
+            else sendErrorResponse(client, "", "Missing programID");
           }
         } else {
           Serial.println("Failed to parse WebSocket JSON: " + String(error.c_str()));
@@ -143,6 +152,135 @@ void onWsEvent(AsyncWebSocket *server, AsyncWebSocketClient *client, AwsEventTyp
     case WS_EVT_ERROR:
       break;
   }
+}
+
+void sendErrorResponse(AsyncWebSocketClient *client, const char *programID, const char *message) {
+  StaticJsonDocument<512> response;
+  response["type"] = "get_program_response";
+  response["success"] = false;
+  response["programID"] = programID;
+  response["message"] = message;
+  String jsonResponse;
+  serializeJson(response, jsonResponse);
+  client->text(jsonResponse);
+  Serial.printf("Sent error to client #%u: %s\n", client->id(), message);
+}
+
+String getNextProgramID() {
+  for (int i = 1; i <= 10; i++) {
+    String idStr = String(i);
+    if (i < 10) idStr = "0" + idStr;
+    String filename = "/program" + idStr + ".json";
+    if (!LittleFS.exists(filename)) {
+      return idStr;
+    }
+  }
+  return "";
+}
+
+void sendProgramResponse(AsyncWebSocketClient *client, bool success, const char *message, const char *programID) {
+  StaticJsonDocument<512> response;
+  response["type"] = "save_program_response";
+  response["success"] = success;
+  response["programID"] = programID;
+  response["message"] = message;
+  String jsonResponse;
+  serializeJson(response, jsonResponse);
+  client->text(jsonResponse);
+  Serial.printf("Sent save_program_response to client #%u: %s\n", client->id(), message);
+}
+
+void handleGetProgram(AsyncWebSocketClient *client, const char *programID) {
+  String idStr = String(programID);
+  if (idStr.length() != 2 || idStr < "01" || idStr > "10") {
+    sendErrorResponse(client, programID, "Invalid programID (must be 01-10)");
+    return;
+  }
+
+  String filename = "/program" + idStr + ".json";
+  if (!LittleFS.exists(filename)) {
+    sendErrorResponse(client, programID, "Program not found");
+    return;
+  }
+
+  File file = LittleFS.open(filename, FILE_READ);
+  if (!file) {
+    sendErrorResponse(client, programID, "Failed to open program file");
+    return;
+  }
+
+  String content = file.readString();
+  file.close();
+
+  StaticJsonDocument<4096> contentDoc;
+  DeserializationError error = deserializeJson(contentDoc, content);
+  if (error) {
+    sendErrorResponse(client, programID, "Invalid JSON in program file");
+    return;
+  }
+
+  StaticJsonDocument<512> response;
+  response["type"] = "get_program_response";
+  response["success"] = true;
+  response["programID"] = programID;
+  response["content"] = content;
+  String jsonResponse;
+  serializeJson(response, jsonResponse);
+  client->text(jsonResponse);
+  Serial.printf("Sent program %s to client #%u\n", programID, client->id());
+}
+
+void handleSaveProgram(AsyncWebSocketClient *client, const JsonDocument &doc) {
+  const char *programID = doc["programID"];
+  const char *content = doc["content"];
+  if (!programID || !content) {
+    sendProgramResponse(client, false, "Missing programID or content", "");
+    return;
+  }
+
+  String idStr = String(programID);
+  if (idStr.length() != 2 || (idStr != "00" && (idStr < "01" || idStr > "10"))) {
+    sendProgramResponse(client, false, "Invalid programID format (must be 00-10)", "");
+    return;
+  }
+
+  StaticJsonDocument<4096> contentDoc;
+  DeserializationError error = deserializeJson(contentDoc, content);
+  if (error) {
+    sendProgramResponse(client, false, "Invalid JSON content", "");
+    return;
+  }
+
+  size_t contentSize = measureJson(contentDoc);
+  if (contentSize > 4096) {
+    sendProgramResponse(client, false, "Program size exceeds 4KB", "");
+    return;
+  }
+
+  String targetID = idStr;
+  if (idStr == "00") {
+    targetID = getNextProgramID();
+    if (targetID == "") {
+      sendProgramResponse(client, false, "No available program slots (max 10)", targetID.c_str());
+      return;
+    }
+  }
+
+  String filename = "/program" + targetID + ".json";
+  File file = LittleFS.open(filename, FILE_WRITE);
+  if (!file) {
+    sendProgramResponse(client, false, "Failed to open file for writing", targetID.c_str());
+    return;
+  }
+
+  if (serializeJson(contentDoc, file) == 0) {
+    file.close();
+    sendProgramResponse(client, false, "Failed to write program", targetID.c_str());
+    return;
+  }
+
+  file.close();
+  sendProgramResponse(client, true, "Program saved successfully", targetID.c_str());
 }
 
 void sendTimeToClients() {
@@ -348,6 +486,13 @@ void WIFI_Connect() {
   Serial.println(config.ssid);
   WiFi.mode(WIFI_STA);
   WiFi.begin(config.ssid, config.password);
+  unsigned long startAttemptTime = millis();
+  const unsigned long timeout = 10000;  // 10 seconds timeout
+  if (WiFi.status() != WL_CONNECTED) {
+    Serial.println("\nFailed to connect to WiFi");
+  } else {
+    Serial.println("\nWiFi connected");
+  }
 }
 
 void setup() {
@@ -384,7 +529,7 @@ void setup() {
     }
   });
 
-  
+
   server.on("/getFile", HTTP_GET, [](AsyncWebServerRequest *request) {
     if (request->hasParam("filename")) {
       String filename = request->getParam("filename")->value();
@@ -418,15 +563,20 @@ void setup() {
 }
 bool isTimeSynced() {
   time_t now = time(nullptr);
-  return now > 946684800; // After Jan 1, 2000
+  return now > 946684800;  // After Jan 1, 2000
 }
 
 void loop() {
+  static unsigned long lastWiFiRetry = 0;
+  if (!wifi_connected && !eth_connected && millis() - lastWiFiRetry >= 30000) {
+    WIFI_Connect();
+    lastWiFiRetry = millis();
+  }
   static unsigned long lastNTPSyncCheck = 0;
   if (millis() - lastNTPSyncCheck >= 30000 && network_up) {
     if (!isTimeSynced()) {
       Serial.println("NTP sync failed, retrying...");
-      syncNTPTime(); // Retry NTP sync
+      syncNTPTime();  // Retry NTP sync
     }
     lastNTPSyncCheck = millis();
   }
