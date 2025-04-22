@@ -354,6 +354,21 @@ function ProgramEditor({ wsRef, isWsReady }) {
         </div>
       )}
       <div className="form-group">
+        <label>Output:</label>
+        <div className="output-toggle">
+          <span className="output-option">A</span>
+          <label className="toggle-switch">
+            <input
+              type="checkbox"
+              checked={output === 'B'}
+              onChange={(e) => setOutput(e.target.checked ? 'B' : 'A')}
+            />
+            <span className="toggle-slider output-slider"></span>
+          </label>
+          <span className="output-option">B</span>
+        </div>
+      </div>
+      <div className="form-group">
         <label htmlFor="trigger">Trigger:</label>
         <select
           id="trigger"
