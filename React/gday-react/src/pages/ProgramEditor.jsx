@@ -16,6 +16,9 @@ function ProgramEditor({ wsRef, isWsReady }) {
   const [endTime, setEndTime] = useState('');
   const [endTimeEnabled, setEndTimeEnabled] = useState(true);
   const [selectedDays, setSelectedDays] = useState([]);
+  const [trigger, setTrigger] = useState('Manual');
+  const [runTime, setRunTime] = useState({ seconds: '', minutes: '', hours: '' });
+  const [stopTime, setStopTime] = useState({ seconds: '', minutes: '', hours: '' });
   const [error, setError] = useState(null);
   const [status, setStatus] = useState('');
   const location = useLocation();
@@ -72,7 +75,7 @@ function ProgramEditor({ wsRef, isWsReady }) {
             setEnabled(content.enabled || false);
             setOutput(content.output || 'A');
             setStartDate(content.startDate || '');
-            setStartDateEnabled(content.startDateEnabled !== false); // Default to true if undefined
+            setStartDateEnabled(content.startDateEnabled !== false);
             setEndDate(content.endDate || '');
             setEndDateEnabled(content.endDateEnabled !== false);
             setStartTime(content.startTime || '');
@@ -80,6 +83,17 @@ function ProgramEditor({ wsRef, isWsReady }) {
             setEndTime(content.endTime || '');
             setEndTimeEnabled(content.endTimeEnabled !== false);
             setSelectedDays(content.selectedDays || []);
+            setTrigger(content.trigger || 'Manual');
+            setRunTime({
+              seconds: content.runTime?.seconds?.toString() || '',
+              minutes: content.runTime?.minutes?.toString() || '',
+              hours: content.runTime?.hours?.toString() || '',
+            });
+            setStopTime({
+              seconds: content.stopTime?.seconds?.toString() || '',
+              minutes: content.stopTime?.minutes?.toString() || '',
+              hours: content.stopTime?.hours?.toString() || '',
+            });
             setStatus(`Loaded program ${data.programID}`);
             setError(null);
           } else {
@@ -118,6 +132,15 @@ function ProgramEditor({ wsRef, isWsReady }) {
     );
   };
 
+  // Update runTime or stopTime fields
+  const updateTimeField = (field, subfield, value) => {
+    const setField = field === 'runTime' ? setRunTime : setStopTime;
+    setField((prev) => ({
+      ...prev,
+      [subfield]: value,
+    }));
+  };
+
   // Sanitize and save the program via WebSocket
   const saveProgram = async () => {
     setError(null);
@@ -136,6 +159,19 @@ function ProgramEditor({ wsRef, isWsReady }) {
       endTime: endTimeEnabled ? endTime : '',
       endTimeEnabled,
       selectedDays,
+      trigger,
+      ...(trigger === 'Cycle Timer' && {
+        runTime: {
+          seconds: parseInt(runTime.seconds) || 0,
+          minutes: parseInt(runTime.minutes) || 0,
+          hours: parseInt(runTime.hours) || 0,
+        },
+        stopTime: {
+          seconds: parseInt(stopTime.seconds) || 0,
+          minutes: parseInt(stopTime.minutes) || 0,
+          hours: parseInt(stopTime.hours) || 0,
+        },
+      }),
     };
     let sanitizedContent;
     try {
@@ -172,6 +208,17 @@ function ProgramEditor({ wsRef, isWsReady }) {
       <h1 className="Title">Program Editor</h1>
       {error && <div className="error">{error}</div>}
       {status && <div className="status">{status}</div>}
+      <div className="form-group">
+        <label>Enabled:</label>
+        <label className="toggle-switch">
+          <input
+            type="checkbox"
+            checked={enabled}
+            onChange={(e) => setEnabled(e.target.checked)}
+          />
+          <span className="toggle-slider enabled-slider"></span>
+        </label>
+      </div>
       <div className="form-group">
         <label htmlFor="name">Name:</label>
         <input
@@ -290,31 +337,101 @@ function ProgramEditor({ wsRef, isWsReady }) {
           ))}
         </div>
       </div>
-      <div class_fwd className="form-group">
-        <label>Enabled:</label>
-        <label className="toggle-switch">
-          <input
-            type="checkbox"
-            checked={enabled}
-            onChange={(e) => setEnabled(e.target.checked)}
-          />
-          <span className="toggle-slider enabled-slider"></span>
-        </label>
-      </div>
       <div className="form-group">
-        <label>Output:</label>
-        <div className="output-toggle">
-          <span className="output-option">A</span>
-          <label className="toggle-switch">
-            <input
-              type="checkbox"
-              checked={output === 'B'}
-              onChange={(e) => setOutput(e.target.checked ? 'B' : 'A')}
-            />
-            <span className="toggle-slider output-slider"></span>
-          </label>
-          <span className="output-option">B</span>
-        </div>
+        <label htmlFor="trigger">Trigger:</label>
+        <select
+          id="trigger"
+          value={trigger}
+          onChange={(e) => setTrigger(e.target.value)}
+          className="input-field"
+        >
+          <option value="Manual">Manual</option>
+          <option value="Cycle Timer">Cycle Timer</option>
+        </select>
+      </div>
+      <div className="trigger-content">
+        {trigger === 'Cycle Timer' ? (
+          <div className="time-fields">
+            <div className="form-group">
+              <label>Run Time:</label>
+              <div className="time-input-group">
+                <div className="time-input">
+                  <input
+                    type="number"
+                    min="0"
+                    value={runTime.hours}
+                    onChange={(e) => updateTimeField('runTime', 'hours', e.target.value)}
+                    placeholder="0"
+                    className="input-field time-subfield"
+                  />
+                  <span>Hours</span>
+                </div>
+                <div className="time-input">
+                  <input
+                    type="number"
+                    min="0"
+                    value={runTime.minutes}
+                    onChange={(e) => updateTimeField('runTime', 'minutes', e.target.value)}
+                    placeholder="0"
+                    className="input-field time-subfield"
+                  />
+                  <span>Minutes</span>
+                </div>
+                <div className="time-input">
+                  <input
+                    type="number"
+                    min="0"
+                    value={runTime.seconds}
+                    onChange={(e) => updateTimeField('runTime', 'seconds', e.target.value)}
+                    placeholder="0"
+                    className="input-field time-subfield"
+                  />
+                  <span>Seconds</span>
+                </div>
+              </div>
+            </div>
+            <div className="form-group">
+              <label>Stop Time:</label>
+              <div className="time-input-group">
+                <div className="time-input">
+                  <input
+                    type="number"
+                    min="0"
+                    value={stopTime.hours}
+                    onChange={(e) => updateTimeField('stopTime', 'hours', e.target.value)}
+                    placeholder="0"
+                    className="input-field time-subfield"
+                  />
+                  <span>Hours</span>
+                </div>
+                <div className="time-input">
+                  <input
+                    type="number"
+                    min="0"
+                    value={stopTime.minutes}
+                    onChange={(e) => updateTimeField('stopTime', 'minutes', e.target.value)}
+                    placeholder="0"
+                    className="input-field time-subfield"
+                  />
+                  <span>Minutes</span>
+                </div>
+                <div className="time-input">
+                  <input
+                    type="number"
+                    min="0"
+                    value={stopTime.seconds}
+                    onChange={(e) => updateTimeField('stopTime', 'seconds', e.target.value)}
+                    placeholder="0"
+                    className="input-field time-subfield"
+                  />
+                  <span>Seconds</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        ) : (
+          <div className="manual-message">Manually powered on</div>
+        )}
       </div>
       <button
         className="save-button"
@@ -326,4 +443,4 @@ function ProgramEditor({ wsRef, isWsReady }) {
   );
 }
 
-export default ProgramEditor; 
+export default ProgramEditor;

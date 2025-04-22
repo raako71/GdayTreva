@@ -130,7 +130,7 @@ table {
 }
 
 .form-group {
-  margin-bottom: 12px; /* Reduced from 16px for tighter spacing with toggles */
+  margin-bottom: 12px;
   display: flex;
   align-items: center;
 }
@@ -156,6 +156,16 @@ table {
 .input-field[type="date"]::-webkit-calendar-picker-indicator,
 .input-field[type="time"]::-webkit-calendar-picker-indicator {
   filter: invert(1); /* White calendar/clock icon for dark theme */
+}
+
+.input-field[type="number"]::-webkit-inner-spin-button,
+.input-field[type="number"]::-webkit-outer-spin-button {
+  -webkit-appearance: none; /* Remove default spin buttons */
+  margin: 0;
+}
+
+.input-field[type="number"] {
+  -moz-appearance: textfield; /* Remove spin buttons in Firefox */
 }
 
 .checkbox-group {
@@ -256,4 +266,39 @@ input:checked + .enabled-slider:before {
 .output-option {
   font-size: 14px;
   font-weight: bold;
+}
+
+/* Trigger Dropdown and Conditional Fields */
+.trigger-content {
+  margin-bottom: 12px;
+}
+
+.manual-message {
+  color: rgba(255, 255, 255, 0.87);
+  font-size: 14px;
+}
+
+.time-fields {
+  margin-left: 20px; /* Indent to align with input fields */
+}
+
+.time-input-group {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+
+.time-input {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.time-subfield {
+  width: 60px; /* Narrower for time subfields */
+}
+
+.time-input span {
+  color: rgba(255, 255, 255, 0.87);
+  font-size: 14px;
 }
