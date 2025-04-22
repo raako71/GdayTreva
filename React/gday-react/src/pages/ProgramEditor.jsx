@@ -7,6 +7,9 @@ function ProgramEditor({ wsRef, isWsReady }) {
   const [name, setName] = useState('');
   const [enabled, setEnabled] = useState(false);
   const [output, setOutput] = useState('A');
+  const [startDate, setStartDate] = useState('');
+  const [endDate, setEndDate] = useState('');
+  const [daysPerWeek, setDaysPerWeek] = useState('');
   const [error, setError] = useState(null);
   const [status, setStatus] = useState('');
   const location = useLocation();
@@ -51,6 +54,9 @@ function ProgramEditor({ wsRef, isWsReady }) {
             setName(content.name || '');
             setEnabled(content.enabled || false);
             setOutput(content.output || 'A');
+            setStartDate(content.startDate || '');
+            setEndDate(content.endDate || '');
+            setDaysPerWeek(content.daysPerWeek ? content.daysPerWeek.toString() : '');
             setStatus(`Loaded program ${data.programID}`);
             setError(null);
           } else {
@@ -63,7 +69,7 @@ function ProgramEditor({ wsRef, isWsReady }) {
             setProgramID(assignedID);
             setStatus(`Program ${assignedID} saved successfully`);
             setError(null);
-            navigate('/programs'); // Redirect to /programs
+            navigate('/programs');
           } else {
             setError(`Failed to save program: ${data.message}`);
             setStatus('');
@@ -85,7 +91,22 @@ function ProgramEditor({ wsRef, isWsReady }) {
     setError(null);
     setStatus('Saving...');
 
-    const programContent = { name, enabled, output };
+    // Validate daysPerWeek
+    const days = parseInt(daysPerWeek, 10);
+    if (daysPerWeek && (isNaN(days) || days < 1 || days > 7)) {
+      setError('Days per week must be a number between 1 and 7');
+      setStatus('');
+      return;
+    }
+
+    const programContent = {
+      name,
+      enabled,
+      output,
+      startDate,
+      endDate,
+      daysPerWeek: daysPerWeek ? days : null,
+    };
     let sanitizedContent;
     try {
       sanitizedContent = JSON.stringify(programContent);
@@ -129,6 +150,39 @@ function ProgramEditor({ wsRef, isWsReady }) {
           value={name}
           onChange={(e) => setName(e.target.value)}
           placeholder="Enter program name"
+          className="input-field"
+        />
+      </div>
+      <div className="form-group">
+        <label htmlFor="startDate">Start Date:</label>
+        <input
+          id="startDate"
+          type="date"
+          value={startDate}
+          onChange={(e) => setStartDate(e.target.value)}
+          className="input-field"
+        />
+      </div>
+      <div className="form-group">
+        <label htmlFor="endDate">End Date:</label>
+        <input
+          id="endDate"
+          type="date"
+          value={endDate}
+          onChange={(e) => setEndDate(e.target.value)}
+          className="input-field"
+        />
+      </div>
+      <div className="form-group">
+        <label htmlFor="daysPerWeek">Days per Week:</label>
+        <input
+          id="daysPerWeek"
+          type="number"
+          min="1"
+          max="7"
+          value={daysPerWeek}
+          onChange={(e) => setDaysPerWeek(e.target.value)}
+          placeholder="1-7"
           className="input-field"
         />
       </div>
