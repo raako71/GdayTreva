@@ -16,6 +16,7 @@ function ProgramEditor({ wsRef, isWsReady }) {
   const [endTime, setEndTime] = useState('');
   const [endTimeEnabled, setEndTimeEnabled] = useState(true);
   const [selectedDays, setSelectedDays] = useState([]);
+  const [daysPerWeekEnabled, setDaysPerWeekEnabled] = useState(true);
   const [trigger, setTrigger] = useState('Manual');
   const [runTime, setRunTime] = useState({ seconds: '', minutes: '', hours: '' });
   const [stopTime, setStopTime] = useState({ seconds: '', minutes: '', hours: '' });
@@ -83,6 +84,7 @@ function ProgramEditor({ wsRef, isWsReady }) {
             setEndTime(content.endTime || '');
             setEndTimeEnabled(content.endTimeEnabled !== false);
             setSelectedDays(content.selectedDays || []);
+            setDaysPerWeekEnabled(content.daysPerWeekEnabled !== false);
             setTrigger(content.trigger || 'Manual');
             setRunTime({
               seconds: content.runTime?.seconds?.toString() || '',
@@ -158,7 +160,8 @@ function ProgramEditor({ wsRef, isWsReady }) {
       startTimeEnabled,
       endTime: endTimeEnabled ? endTime : '',
       endTimeEnabled,
-      selectedDays,
+      selectedDays: daysPerWeekEnabled ? selectedDays : [],
+      daysPerWeekEnabled,
       trigger,
       ...(trigger === 'Cycle Timer' && {
         runTime: {
@@ -322,21 +325,34 @@ function ProgramEditor({ wsRef, isWsReady }) {
           />
         </div>
       )}
-      <div className="form-group days-group">
-        <label>Days per Week:</label>
-        <div className="checkbox-group">
-          {daysOfWeek.map((day) => (
-            <label key={day} className="checkbox-label">
-              <input
-                type="checkbox"
-                checked={selectedDays.includes(day)}
-                onChange={() => toggleDay(day)}
-              />
-              {day}
-            </label>
-          ))}
-        </div>
+      <div className="form-group">
+        <label>Days per Week Enabled:</label>
+        <label className="toggle-switch">
+          <input
+            type="checkbox"
+            checked={daysPerWeekEnabled}
+            onChange={(e) => setDaysPerWeekEnabled(e.target.checked)}
+          />
+          <span className="toggle-slider enabled-slider"></span>
+        </label>
       </div>
+      {daysPerWeekEnabled && (
+        <div className="form-group days-group">
+          <label>Days per Week:</label>
+          <div className="checkbox-group">
+            {daysOfWeek.map((day) => (
+              <label key={day} className="checkbox-label">
+                <input
+                  type="checkbox"
+                  checked={selectedDays.includes(day)}
+                  onChange={() => toggleDay(day)}
+                />
+                {day}
+              </label>
+            ))}
+          </div>
+        </div>
+      )}
       <div className="form-group">
         <label htmlFor="trigger">Trigger:</label>
         <select
