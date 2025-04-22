@@ -12,3 +12,4 @@ R0.9: Create and edit programs.
 R0.10: Tidy CSS.
 R0.11: Link for new programs + format document.
 R0.12: Lint errors or whatever.
+R0.13: Favicon
