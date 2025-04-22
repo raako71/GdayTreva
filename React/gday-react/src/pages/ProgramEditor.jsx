@@ -63,7 +63,7 @@ function ProgramEditor({ wsRef, isWsReady }) {
             setProgramID(assignedID);
             setStatus(`Program ${assignedID} saved successfully`);
             setError(null);
-            navigate(`/programEditor?programID=${assignedID}`);
+            navigate('/programs'); // Redirect to /programs
           } else {
             setError(`Failed to save program: ${data.message}`);
             setStatus('');
@@ -134,26 +134,26 @@ function ProgramEditor({ wsRef, isWsReady }) {
       </div>
       <div className="form-group">
         <label>Enabled:</label>
-        <label className="switch">
+        <label className="toggle-switch">
           <input
             type="checkbox"
             checked={enabled}
             onChange={(e) => setEnabled(e.target.checked)}
           />
-          <span className="slider"></span>
+          <span className="toggle-slider enabled-slider"></span>
         </label>
       </div>
       <div className="form-group">
         <label>Output:</label>
         <div className="output-toggle">
           <span className="output-option">A</span>
-          <label className="switch">
+          <label className="toggle-switch">
             <input
               type="checkbox"
               checked={output === 'B'}
               onChange={(e) => setOutput(e.target.checked ? 'B' : 'A')}
             />
-            <span className="slider"></span>
+            <span className="toggle-slider output-slider"></span>
           </label>
           <span className="output-option">B</span>
         </div>
