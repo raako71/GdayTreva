@@ -153,8 +153,9 @@ table {
   color: rgba(255, 255, 255, 0.87);
 }
 
-.input-field[type="date"]::-webkit-calendar-picker-indicator {
-  filter: invert(1); /* White calendar icon for dark theme */
+.input-field[type="date"]::-webkit-calendar-picker-indicator,
+.input-field[type="time"]::-webkit-calendar-picker-indicator {
+  filter: invert(1); /* White calendar/clock icon for dark theme */
 }
 
 .checkbox-group {

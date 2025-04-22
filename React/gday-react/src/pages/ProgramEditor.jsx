@@ -9,6 +9,8 @@ function ProgramEditor({ wsRef, isWsReady }) {
   const [output, setOutput] = useState('A');
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
+  const [startTime, setStartTime] = useState('');
+  const [endTime, setEndTime] = useState('');
   const [selectedDays, setSelectedDays] = useState([]);
   const [error, setError] = useState(null);
   const [status, setStatus] = useState('');
@@ -67,6 +69,8 @@ function ProgramEditor({ wsRef, isWsReady }) {
             setOutput(content.output || 'A');
             setStartDate(content.startDate || '');
             setEndDate(content.endDate || '');
+            setStartTime(content.startTime || '');
+            setEndTime(content.endTime || '');
             setSelectedDays(content.selectedDays || []);
             setStatus(`Loaded program ${data.programID}`);
             setError(null);
@@ -117,6 +121,8 @@ function ProgramEditor({ wsRef, isWsReady }) {
       output,
       startDate,
       endDate,
+      startTime,
+      endTime,
       selectedDays,
     };
     let sanitizedContent;
@@ -176,12 +182,32 @@ function ProgramEditor({ wsRef, isWsReady }) {
         />
       </div>
       <div className="form-group">
+        <label htmlFor="startTime">Start Time:</label>
+        <input
+          id="startTime"
+          type="time"
+          value={startTime}
+          onChange={(e) => setStartTime(e.target.value)}
+          className="input-field"
+        />
+      </div>
+      <div className="form-group">
         <label htmlFor="endDate">End Date:</label>
         <input
           id="endDate"
           type="date"
           value={endDate}
           onChange={(e) => setEndDate(e.target.value)}
+          className="input-field"
+        />
+      </div>
+      <div className="form-group">
+        <label htmlFor="endTime">End Time:</label>
+        <input
+          id="endTime"
+          type="time"
+          value={endTime}
+          onChange={(e) => setEndTime(e.target.value)}
           className="input-field"
         />
       </div>
