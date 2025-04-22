@@ -130,7 +130,7 @@ table {
 }
 
 .form-group {
-  margin-bottom: 16px;
+  margin-bottom: 12px; /* Reduced from 16px for tighter spacing with toggles */
   display: flex;
   align-items: center;
 }

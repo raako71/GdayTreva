@@ -8,9 +8,13 @@ function ProgramEditor({ wsRef, isWsReady }) {
   const [enabled, setEnabled] = useState(false);
   const [output, setOutput] = useState('A');
   const [startDate, setStartDate] = useState('');
+  const [startDateEnabled, setStartDateEnabled] = useState(true);
   const [endDate, setEndDate] = useState('');
+  const [endDateEnabled, setEndDateEnabled] = useState(true);
   const [startTime, setStartTime] = useState('');
+  const [startTimeEnabled, setStartTimeEnabled] = useState(true);
   const [endTime, setEndTime] = useState('');
+  const [endTimeEnabled, setEndTimeEnabled] = useState(true);
   const [selectedDays, setSelectedDays] = useState([]);
   const [error, setError] = useState(null);
   const [status, setStatus] = useState('');
@@ -68,9 +72,13 @@ function ProgramEditor({ wsRef, isWsReady }) {
             setEnabled(content.enabled || false);
             setOutput(content.output || 'A');
             setStartDate(content.startDate || '');
+            setStartDateEnabled(content.startDateEnabled !== false); // Default to true if undefined
             setEndDate(content.endDate || '');
+            setEndDateEnabled(content.endDateEnabled !== false);
             setStartTime(content.startTime || '');
+            setStartTimeEnabled(content.startTimeEnabled !== false);
             setEndTime(content.endTime || '');
+            setEndTimeEnabled(content.endTimeEnabled !== false);
             setSelectedDays(content.selectedDays || []);
             setStatus(`Loaded program ${data.programID}`);
             setError(null);
@@ -119,10 +127,14 @@ function ProgramEditor({ wsRef, isWsReady }) {
       name,
       enabled,
       output,
-      startDate,
-      endDate,
-      startTime,
-      endTime,
+      startDate: startDateEnabled ? startDate : '',
+      startDateEnabled,
+      endDate: endDateEnabled ? endDate : '',
+      endDateEnabled,
+      startTime: startTimeEnabled ? startTime : '',
+      startTimeEnabled,
+      endTime: endTimeEnabled ? endTime : '',
+      endTimeEnabled,
       selectedDays,
     };
     let sanitizedContent;
@@ -172,45 +184,97 @@ function ProgramEditor({ wsRef, isWsReady }) {
         />
       </div>
       <div className="form-group">
-        <label htmlFor="startDate">Start Date:</label>
-        <input
-          id="startDate"
-          type="date"
-          value={startDate}
-          onChange={(e) => setStartDate(e.target.value)}
-          className="input-field"
-        />
+        <label>Start Date Enabled:</label>
+        <label className="toggle-switch">
+          <input
+            type="checkbox"
+            checked={startDateEnabled}
+            onChange={(e) => setStartDateEnabled(e.target.checked)}
+          />
+          <span className="toggle-slider enabled-slider"></span>
+        </label>
       </div>
+      {startDateEnabled && (
+        <div className="form-group">
+          <label htmlFor="startDate">Start Date:</label>
+          <input
+            id="startDate"
+            type="date"
+            value={startDate}
+            onChange={(e) => setStartDate(e.target.value)}
+            className="input-field"
+          />
+        </div>
+      )}
       <div className="form-group">
-        <label htmlFor="startTime">Start Time:</label>
-        <input
-          id="startTime"
-          type="time"
-          value={startTime}
-          onChange={(e) => setStartTime(e.target.value)}
-          className="input-field"
-        />
+        <label>Start Time Enabled:</label>
+        <label className="toggle-switch">
+          <input
+            type="checkbox"
+            checked={startTimeEnabled}
+            onChange={(e) => setStartTimeEnabled(e.target.checked)}
+          />
+          <span className="toggle-slider enabled-slider"></span>
+        </label>
       </div>
+      {startTimeEnabled && (
+        <div className="form-group">
+          <label htmlFor="startTime">Start Time:</label>
+          <input
+            id="startTime"
+            type="time"
+            value={startTime}
+            onChange={(e) => setStartTime(e.target.value)}
+            className="input-field"
+          />
+        </div>
+      )}
       <div className="form-group">
-        <label htmlFor="endDate">End Date:</label>
-        <input
-          id="endDate"
-          type="date"
-          value={endDate}
-          onChange={(e) => setEndDate(e.target.value)}
-          className="input-field"
-        />
+        <label>End Date Enabled:</label>
+        <label className="toggle-switch">
+          <input
+            type="checkbox"
+            checked={endDateEnabled}
+            onChange={(e) => setEndDateEnabled(e.target.checked)}
+          />
+          <span className="toggle-slider enabled-slider"></span>
+        </label>
       </div>
+      {endDateEnabled && (
+        <div className="form-group">
+          <label htmlFor="endDate">End Date:</label>
+          <input
+            id="endDate"
+            type="date"
+            value={endDate}
+            onChange={(e) => setEndDate(e.target.value)}
+            className="input-field"
+          />
+        </div>
+      )}
       <div className="form-group">
-        <label htmlFor="endTime">End Time:</label>
-        <input
-          id="endTime"
-          type="time"
-          value={endTime}
-          onChange={(e) => setEndTime(e.target.value)}
-          className="input-field"
-        />
+        <label>End Time Enabled:</label>
+        <label className="toggle-switch">
+          <input
+            type="checkbox"
+            checked={endTimeEnabled}
+            onChange={(e) => setEndTimeEnabled(e.target.checked)}
+          />
+          <span className="toggle-slider enabled-slider"></span>
+        </label>
       </div>
+      {endTimeEnabled && (
+        <div className="form-group">
+          <label htmlFor="endTime">End Time:</label>
+          <input
+            id="endTime"
+            type="time"
+            value={endTime}
+            onChange={(e) => setEndTime(e.target.value)}
+            className="input-field"
+          />
+        </div>
+      )}
       <div className="form-group days-group">
         <label>Days per Week:</label>
         <div className="checkbox-group">
@@ -226,7 +290,7 @@ function ProgramEditor({ wsRef, isWsReady }) {
           ))}
         </div>
       </div>
-      <div className="form-group">
+      <div class_fwd className="form-group">
         <label>Enabled:</label>
         <label className="toggle-switch">
           <input
@@ -262,4 +326,4 @@ function ProgramEditor({ wsRef, isWsReady }) {
   );
 }
 
-export default ProgramEditor;
+export default ProgramEditor; 
