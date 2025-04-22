@@ -135,6 +135,10 @@ table {
   align-items: center;
 }
 
+.form-group.days-group {
+  align-items: flex-start;
+}
+
 .form-group label {
   margin-right: 8px;
   font-weight: bold;
@@ -153,14 +157,22 @@ table {
   filter: invert(1); /* White calendar icon for dark theme */
 }
 
-.input-field[type="number"]::-webkit-inner-spin-button,
-.input-field[type="number"]::-webkit-outer-spin-button {
-  -webkit-appearance: none; /* Remove default spin buttons */
-  margin: 0;
+.checkbox-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
-.input-field[type="number"] {
-  -moz-appearance: textfield; /* Remove spin buttons in Firefox */
+.checkbox-label {
+  display: flex;
+  align-items: center;
+  color: rgba(255, 255, 255, 0.87);
+  font-size: 14px;
+}
+
+.checkbox-label input[type="checkbox"] {
+  margin-right: 4px;
+  accent-color: #009a0a; /* Green checkbox when checked */
 }
 
 .save-button {

@@ -9,12 +9,23 @@ function ProgramEditor({ wsRef, isWsReady }) {
   const [output, setOutput] = useState('A');
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
-  const [daysPerWeek, setDaysPerWeek] = useState('');
+  const [selectedDays, setSelectedDays] = useState([]);
   const [error, setError] = useState(null);
   const [status, setStatus] = useState('');
   const location = useLocation();
   const navigate = useNavigate();
   const hasFetched = useRef(false);
+
+  // List of days for checkboxes
+  const daysOfWeek = [
+    'Monday',
+    'Tuesday',
+    'Wednesday',
+    'Thursday',
+    'Friday',
+    'Saturday',
+    'Sunday',
+  ];
 
   // Parse URL for programID on mount
   useEffect(() => {
@@ -56,7 +67,7 @@ function ProgramEditor({ wsRef, isWsReady }) {
             setOutput(content.output || 'A');
             setStartDate(content.startDate || '');
             setEndDate(content.endDate || '');
-            setDaysPerWeek(content.daysPerWeek ? content.daysPerWeek.toString() : '');
+            setSelectedDays(content.selectedDays || []);
             setStatus(`Loaded program ${data.programID}`);
             setError(null);
           } else {
@@ -86,18 +97,19 @@ function ProgramEditor({ wsRef, isWsReady }) {
     };
   }, [wsRef, isWsReady, programID, navigate]);
 
+  // Toggle day selection
+  const toggleDay = (day) => {
+    setSelectedDays((prev) =>
+      prev.includes(day)
+        ? prev.filter((d) => d !== day)
+        : [...prev, day]
+    );
+  };
+
   // Sanitize and save the program via WebSocket
   const saveProgram = async () => {
     setError(null);
     setStatus('Saving...');
-
-    // Validate daysPerWeek
-    const days = parseInt(daysPerWeek, 10);
-    if (daysPerWeek && (isNaN(days) || days < 1 || days > 7)) {
-      setError('Days per week must be a number between 1 and 7');
-      setStatus('');
-      return;
-    }
 
     const programContent = {
       name,
@@ -105,7 +117,7 @@ function ProgramEditor({ wsRef, isWsReady }) {
       output,
       startDate,
       endDate,
-      daysPerWeek: daysPerWeek ? days : null,
+      selectedDays,
     };
     let sanitizedContent;
     try {
@@ -173,18 +185,20 @@ function ProgramEditor({ wsRef, isWsReady }) {
           className="input-field"
         />
       </div>
-      <div className="form-group">
-        <label htmlFor="daysPerWeek">Days per Week:</label>
-        <input
-          id="daysPerWeek"
-          type="number"
-          min="1"
-          max="7"
-          value={daysPerWeek}
-          onChange={(e) => setDaysPerWeek(e.target.value)}
-          placeholder="1-7"
-          className="input-field"
-        />
+      <div className="form-group days-group">
+        <label>Days per Week:</label>
+        <div className="checkbox-group">
+          {daysOfWeek.map((day) => (
+            <label key={day} className="checkbox-label">
+              <input
+                type="checkbox"
+                checked={selectedDays.includes(day)}
+                onChange={() => toggleDay(day)}
+              />
+              {day}
+            </label>
+          ))}
+        </div>
       </div>
       <div className="form-group">
         <label>Enabled:</label>
