@@ -4,7 +4,9 @@ import '../styles.css';
 
 function ProgramEditor({ wsRef, isWsReady }) {
   const [programID, setProgramID] = useState('00');
-  const [programContent, setProgramContent] = useState('');
+  const [name, setName] = useState('');
+  const [enabled, setEnabled] = useState(false);
+  const [output, setOutput] = useState('A');
   const [error, setError] = useState(null);
   const [status, setStatus] = useState('');
   const location = useLocation();
@@ -20,7 +22,7 @@ function ProgramEditor({ wsRef, isWsReady }) {
       if (!isNaN(parsedID) && parsedID >= 1 && parsedID <= 10) {
         const formattedID = parsedID.toString().padStart(2, '0');
         setProgramID(formattedID);
-        hasFetched.current = false; // Reset to allow fetch for new URL ID
+        hasFetched.current = false;
       } else {
         setError('Invalid programID in URL (must be 1 to 10)');
       }
@@ -45,7 +47,10 @@ function ProgramEditor({ wsRef, isWsReady }) {
         const data = JSON.parse(event.data);
         if (data.type === 'get_program_response') {
           if (data.success) {
-            setProgramContent(JSON.stringify(JSON.parse(data.content), null, 2));
+            const content = JSON.parse(data.content);
+            setName(content.name || '');
+            setEnabled(content.enabled || false);
+            setOutput(content.output || 'A');
             setStatus(`Loaded program ${data.programID}`);
             setError(null);
           } else {
@@ -80,12 +85,12 @@ function ProgramEditor({ wsRef, isWsReady }) {
     setError(null);
     setStatus('Saving...');
 
+    const programContent = { name, enabled, output };
     let sanitizedContent;
     try {
-      sanitizedContent = JSON.parse(programContent);
-      sanitizedContent = JSON.stringify(sanitizedContent);
+      sanitizedContent = JSON.stringify(programContent);
     } catch (err) {
-      setError('Invalid JSON format');
+      setError('Error serializing program data');
       setStatus('');
       return;
     }
@@ -114,16 +119,47 @@ function ProgramEditor({ wsRef, isWsReady }) {
   return (
     <div>
       <h1 className="Title">Program Editor</h1>
-      {error && <div>{error}</div>}
-      {status && <div>{status}</div>}
-      <textarea
-        className="w-full h-64 p-2 border rounded mb-4"
-        value={programContent}
-        onChange={(e) => setProgramContent(e.target.value)}
-        placeholder="Enter your program (JSON format)"
-      />
+      {error && <div className="error">{error}</div>}
+      {status && <div className="status">{status}</div>}
+      <div className="form-group">
+        <label htmlFor="name">Name:</label>
+        <input
+          id="name"
+          type="text"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          placeholder="Enter program name"
+          className="input-field"
+        />
+      </div>
+      <div className="form-group">
+        <label>Enabled:</label>
+        <label className="switch">
+          <input
+            type="checkbox"
+            checked={enabled}
+            onChange={(e) => setEnabled(e.target.checked)}
+          />
+          <span className="slider"></span>
+        </label>
+      </div>
+      <div className="form-group">
+        <label>Output:</label>
+        <div className="output-toggle">
+          <span className="output-option">A</span>
+          <label className="switch">
+            <input
+              type="checkbox"
+              checked={output === 'B'}
+              onChange={(e) => setOutput(e.target.checked ? 'B' : 'A')}
+            />
+            <span className="slider"></span>
+          </label>
+          <span className="output-option">B</span>
+        </div>
+      </div>
       <button
-        className="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded"
+        className="save-button"
         onClick={saveProgram}
       >
         Save Program
