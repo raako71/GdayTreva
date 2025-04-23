@@ -9,7 +9,7 @@ import ProgramEditor from './pages/ProgramEditor';
 import './styles.css';
 
 function App() {
-  const [message, setMessage] = useState(null);
+  const [message, setMessage] = useState({ epoch: 0, offset_minutes: 0, mem_used: 0, mem_total: 0 });
   const [networkInfo, setNetworkInfo] = useState(null);
   const [connectionStatus, setConnectionStatus] = useState('Attempting to connect...');
   const [lastError, setLastError] = useState(null);
@@ -79,6 +79,7 @@ function App() {
         if (isMounted) {
           try {
             const data = JSON.parse(event.data);
+            //console.log('Received WebSocket message:', data); // Debug log
             if (!data.type) {
               console.warn('Message missing type:', data);
               return;
@@ -86,6 +87,7 @@ function App() {
             switch (data.type) {
               case 'time':
                 setMessage(data);
+                //console.log('Updated message with time:', data);
                 break;
               case 'network_info':
                 setNetworkInfo(data);
@@ -98,7 +100,7 @@ function App() {
                 break;
               case 'time_offset':
                 setMessage((prev) => ({ ...prev, offset_minutes: data.offset_minutes }));
-                console.log('Received time_offset:', data.offset_minutes);
+                //console.log('Received time_offset:', data.offset_minutes);
                 break;
               default:
                 console.warn('Unknown message type:', data.type);

@@ -9,16 +9,15 @@ function TimeBar({ message, wsRef }) {
 
   // Format time with ESP32's offset
   const formatTime = (epoch, offsetMinutes) => {
-    if (!epoch || isNaN(epoch) || offsetMinutes == null || isNaN(offsetMinutes)) {
-      console.warn('Invalid time data:', { epoch, offsetMinutes });
-      return 'N/A';
+    if (!epoch || isNaN(epoch) || epoch === 0 || offsetMinutes == null || isNaN(offsetMinutes)) {
+      return 'Waiting for time data...'; // Graceful message for initial state
     }
     // Convert epoch (seconds) to milliseconds and apply offset (minutes to seconds)
     const adjustedEpochMs = (epoch + offsetMinutes * 60) * 1000;
     const date = new Date(adjustedEpochMs);
     if (isNaN(date.getTime())) {
       console.warn('Invalid date calculated:', { epoch, offsetMinutes, adjustedEpochMs });
-      return 'N/A';
+      return 'Invalid time';
     }
     //console.log('Time calculation:', { epoch, offsetMinutes, adjustedEpochMs, date: date.toISOString() });
     // Use UTC methods to avoid browser timezone interference
