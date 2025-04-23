@@ -2,26 +2,102 @@ import '../styles.css';
 import { Link } from 'react-router-dom';
 import { useState } from 'react';
 
-function TimeBar({ message }) {
+function TimeBar({ message, wsRef }) {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const [isOverlayOpen, setIsOverlayOpen] = useState(false);
+  const [offsetError, setOffsetError] = useState(null);
 
-  const formatTime = (epoch) => {
-    if (!epoch) return 'N/A';
-    const date = new Date(epoch * 1000);
-    return date.toLocaleString();
+  // Format time with ESP32's offset
+  const formatTime = (epoch, offsetMinutes) => {
+    if (!epoch || isNaN(epoch) || offsetMinutes == null || isNaN(offsetMinutes)) {
+      console.warn('Invalid time data:', { epoch, offsetMinutes });
+      return 'N/A';
+    }
+    // Convert epoch (seconds) to milliseconds and apply offset (minutes to seconds)
+    const adjustedEpochMs = (epoch + offsetMinutes * 60) * 1000;
+    const date = new Date(adjustedEpochMs);
+    if (isNaN(date.getTime())) {
+      console.warn('Invalid date calculated:', { epoch, offsetMinutes, adjustedEpochMs });
+      return 'N/A';
+    }
+    //console.log('Time calculation:', { epoch, offsetMinutes, adjustedEpochMs, date: date.toISOString() });
+    // Use UTC methods to avoid browser timezone interference
+    const day = String(date.getUTCDate()).padStart(2, '0');
+    const month = String(date.getUTCMonth() + 1).padStart(2, '0');
+    const year = date.getUTCFullYear();
+    const hours = String(date.getUTCHours()).padStart(2, '0');
+    const minutes = String(date.getUTCMinutes()).padStart(2, '0');
+    const seconds = String(date.getUTCSeconds()).padStart(2, '0');
+    
+    // Format offset as +HH:mm
+    const offsetHours = Math.floor(Math.abs(offsetMinutes) / 60);
+    const offsetMins = Math.abs(offsetMinutes) % 60;
+    const offsetSign = offsetMinutes >= 0 ? '+' : '-';
+    const offsetStr = `${offsetSign}${String(offsetHours).padStart(2, '0')}:${String(offsetMins).padStart(2, '0')}`;
+    
+    return `${day}/${month}/${year}, ${hours}:${minutes}:${seconds} (${offsetStr})`;
+  };
+
+  // Format offset as +HH:mm for overlay
+  const formatOffset = (minutes) => {
+    if (minutes == null || isNaN(minutes)) return 'N/A';
+    const hours = Math.floor(Math.abs(minutes) / 60);
+    const mins = Math.abs(minutes) % 60;
+    const sign = minutes >= 0 ? '+' : '-';
+    return `${sign}${String(hours).padStart(2, '0')}:${String(mins).padStart(2, '0')}`;
   };
 
   const toggleMenu = () => {
     setIsMenuOpen(!isMenuOpen);
+    if (isOverlayOpen) setIsOverlayOpen(false);
+  };
+
+  const toggleOverlay = () => {
+    setIsOverlayOpen(!isOverlayOpen);
+    setOffsetError(null);
+    if (isMenuOpen) setIsMenuOpen(false);
+  };
+
+  const updateOffset = () => {
+    if (!wsRef?.current || wsRef.current.readyState !== WebSocket.OPEN) {
+      setOffsetError('WebSocket not connected');
+      console.error('WebSocket not connected for set_time_offset');
+      return;
+    }
+    const browserOffset = -new Date().getTimezoneOffset();
+    const message = {
+      command: 'set_time_offset',
+      offset_minutes: browserOffset,
+    };
+    try {
+      console.log('Sending set_time_offset:', message);
+      wsRef.current.send(JSON.stringify(message));
+      setIsOverlayOpen(false);
+    } catch (error) {
+      setOffsetError('Failed to update offset');
+      console.error('Error sending set_time_offset:', error);
+    }
   };
 
   const memPercent = message?.mem_total
     ? Math.round(((message.mem_total - message.mem_used) / message.mem_total) * 100)
     : 0;
 
+  const browserOffset = -new Date().getTimezoneOffset();
+  const isOffsetMismatch = message?.offset_minutes != null && message.offset_minutes !== browserOffset;
+
   return (
     <div className="time-bar">
-      <div>Time: {formatTime(message?.epoch)}</div>
+      <button
+        className="time-display"
+        onClick={toggleOverlay}
+        aria-label="Adjust time offset"
+      >
+        Time:{' '}
+        <span className={isOffsetMismatch ? 'offset-mismatch' : ''}>
+          {formatTime(message?.epoch, message?.offset_minutes)}
+        </span>
+      </button>
       <div>-</div>
       <div>Memory Free: {memPercent}%</div>
       <button
@@ -74,6 +150,32 @@ function TimeBar({ message }) {
           >
             Programs
           </Link>
+        </div>
+      )}
+      {isOverlayOpen && (
+        <div className="overlay-backdrop" onClick={toggleOverlay}>
+          <div className="overlay" onClick={(e) => e.stopPropagation()}>
+            <h2 className="overlay-header">Time Offset Settings</h2>
+            <p>ESP32 Time Offset: {formatOffset(message?.offset_minutes)}</p>
+            <p>Local Browser Offset: {formatOffset(browserOffset)}</p>
+            <p>Update ESP32 offset to local browser time?</p>
+            {offsetError && <p className="overlay-error">{offsetError}</p>}
+            <div className="overlay-buttons">
+              <button
+                className="save-button"
+                onClick={updateOffset}
+                disabled={!wsRef?.current || wsRef.current.readyState !== WebSocket.OPEN}
+              >
+                Update
+              </button>
+              <button
+                className="cancel-button"
+                onClick={toggleOverlay}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

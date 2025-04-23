@@ -1,3 +1,4 @@
+/* Existing styles remain unchanged */
 :root {
   font-family: system-ui, Avenir, Helvetica, Arial, sans-serif;
   line-height: 1.5;
@@ -11,7 +12,7 @@
 }
 
 .App {
-  padding-top: 40px; /* Clear the fixed time-bar */
+  padding-top: 40px;
   color: #009a0a;
 }
 
@@ -29,7 +30,7 @@
   box-sizing: border-box;
   display: flex;
   flex-direction: row;
-  align-items: center; /* Vertically center items */
+  align-items: center;
   gap: 5px;
   position: fixed;
   top: 0;
@@ -44,23 +45,23 @@
   padding: 8px;
   display: flex;
   align-items: center;
-  margin-left: auto; /* Ensure right justification */
+  margin-left: auto;
 }
 
 .hamburger-icon {
-  width: 24px; /* Visible size */
+  width: 24px;
   height: 24px;
-  stroke: white; /* White icon for contrast */
+  stroke: white;
 }
 
 .menu {
   position: absolute;
-  top: 100%; /* Drop below time-bar */
-  right: 0; /* Align to right edge */
-  background-color: #2a2a2a; /* Dark background similar to time-bar */
+  top: 100%;
+  right: 0;
+  background-color: #2a2a2a;
   color: white;
-  width: 192px; /* Fixed width for menu */
-  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3); /* Subtle shadow */
+  width: 192px;
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3);
   display: flex;
   flex-direction: column;
   z-index: 1000;
@@ -74,11 +75,11 @@
 }
 
 .menu-item:hover {
-  background-color: #3a3a3a; /* Hover effect */
+  background-color: #3a3a3a;
 }
 
 .time-bar > div {
-  margin: 0; /* Reset margins for flex */
+  margin: 0;
 }
 
 .Tile {
@@ -92,25 +93,17 @@
 
 .Tile-container {
   display: flex;
-  justify-content: center; /* Horizontally centers the tile */
+  justify-content: center;
 }
 
-/* unvisited link */
-a:link {
+a:link, a:visited {
   color: #1893ff;
 }
 
-/* visited link */
-a:visited {
-  color: #1893ff;
-}
-
-/* mouse over link */
 a:hover {
   color: #fff;
 }
 
-/* selected link */
 a:active {
   color: blue;
 }
@@ -155,17 +148,17 @@ table {
 
 .input-field[type="date"]::-webkit-calendar-picker-indicator,
 .input-field[type="time"]::-webkit-calendar-picker-indicator {
-  filter: invert(1); /* White calendar/clock icon for dark theme */
+  filter: invert(1);
 }
 
 .input-field[type="number"]::-webkit-inner-spin-button,
 .input-field[type="number"]::-webkit-outer-spin-button {
-  -webkit-appearance: none; /* Remove default spin buttons */
+  -webkit-appearance: none;
   margin: 0;
 }
 
 .input-field[type="number"] {
-  -moz-appearance: textfield; /* Remove spin buttons in Firefox */
+  -moz-appearance: textfield;
 }
 
 .checkbox-group {
@@ -183,7 +176,7 @@ table {
 
 .checkbox-label input[type="checkbox"] {
   margin-right: 4px;
-  accent-color: #009a0a; /* Green checkbox when checked */
+  accent-color: #009a0a;
 }
 
 .save-button {
@@ -199,7 +192,6 @@ table {
   background-color: #0056b3;
 }
 
-/* Toggle Switch */
 .toggle-switch {
   position: relative;
   display: inline-block;
@@ -242,21 +234,18 @@ input:checked + .toggle-slider:before {
   transform: translateX(26px);
 }
 
-/* Enabled Toggle */
 .enabled-slider:before {
   background-color: black;
 }
 
 input:checked + .enabled-slider:before {
-  background-color: #009a0a; /* Green when enabled */
+  background-color: #009a0a;
 }
 
-/* Output Toggle */
 .output-slider:before {
-  background-color: #009a0a; /* Always green for output */
+  background-color: #009a0a;
 }
 
-/* Output Toggle Container */
 .output-toggle {
   display: flex;
   align-items: center;
@@ -268,7 +257,6 @@ input:checked + .enabled-slider:before {
   font-weight: bold;
 }
 
-/* Trigger Dropdown and Conditional Fields */
 .trigger-content {
   margin-bottom: 12px;
 }
@@ -279,7 +267,7 @@ input:checked + .enabled-slider:before {
 }
 
 .time-fields {
-  margin-left: 20px; /* Indent to align with input fields */
+  margin-left: 20px;
 }
 
 .time-input-group {
@@ -295,10 +283,86 @@ input:checked + .enabled-slider:before {
 }
 
 .time-subfield {
-  width: 60px; /* Narrower for time subfields */
+  width: 60px;
 }
 
 .time-input span {
   color: rgba(255, 255, 255, 0.87);
   font-size: 14px;
+}
+
+.time-display {
+  background: none;
+  border: none;
+  color: rgba(255, 255, 255, 0.87);
+  cursor: pointer;
+  padding: 0;
+  font: inherit;
+}
+
+.time-display:hover {
+  text-decoration: underline;
+}
+
+.offset-mismatch {
+  color: red;
+}
+
+.overlay-backdrop {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background-color: rgba(0, 0, 0, 0.5);
+  z-index: 2000;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+.overlay {
+  background-color: #242424;
+  color: rgba(255, 255, 255, 0.87);
+  border-radius: 4px;
+  padding: 16px;
+  width: 300px;
+  max-width: 90%;
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3);
+}
+
+.overlay-header {
+  font-size: 18px;
+  font-weight: bold;
+  margin-bottom: 12px;
+}
+
+.overlay p {
+  font-size: 14px;
+  margin-bottom: 8px;
+}
+
+.overlay-error {
+  color: red;
+  font-size: 12px;
+  margin-top: 8px;
+}
+
+.overlay-buttons {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.cancel-button {
+  background-color: #3a3a3a;
+  color: white;
+  padding: 8px 16px;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.cancel-button:hover {
+  background-color: #4a4a4a;
 }
