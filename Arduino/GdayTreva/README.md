@@ -22,3 +22,5 @@
  - 0.0.18: Formatting.
  - 0.0.19: Show Eth info on settings page.
  - 0.0.20: NTP Check.
+ - 0.0.21: React Routing
+ - 0.0.22: DNS issues. Kinda verbose wordarounds.

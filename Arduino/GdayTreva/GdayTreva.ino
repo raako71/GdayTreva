@@ -1,4 +1,3 @@
-//[Ctrl] + [Shift] + [P], then "Upload LittleFS to Pico/ESP8266/ESP32".
 #include <ETH.h>
 #include <WiFi.h>
 #include <Arduino.h>
@@ -6,23 +5,22 @@
 #include <ESPAsyncWebServer.h>
 #include <LittleFS.h>
 #include <ArduinoJson.h>
-#include <ESPmDNS.h>   // For mDNS support
-#include <time.h>      // For time functions
-#include <sys/time.h>  // For struct timeval
+#include <ESPmDNS.h>
+#include <time.h>
+#include <sys/time.h>
 
 #define FORMAT_LITTLEFS_IF_FAILED true
 
 struct Config {
   char ssid[32];
   char password[64];
-  char mdns_hostname[32];        // Single mDNS hostname for both interfaces
-  char ntp_server[32];           // NTP server (e.g., "pool.ntp.org")
-  char internet_check_host[32];  // Host to check for internet connectivity (e.g., "8.8.8.8")
+  char mdns_hostname[32];
+  char ntp_server[32];
+  char internet_check_host[32];
+  int time_offset_minutes; // Added for time offset
 };
 
-
-
-Config config;  // Global configuration object
+Config config;
 static bool eth_connected = false;
 static bool wifi_connected = false;
 static bool internet_connected = false;
@@ -49,6 +47,7 @@ void networkEvent(arduino_event_id_t event) {
     case ARDUINO_EVENT_ETH_GOT_IP:
       Serial.println("ETH Got IP");
       Serial.println("Ethernet IP: " + ETH.localIP().toString());
+      Serial.println("ETH DNS: " + ETH.dnsIP().toString());
       eth_connected = true;
       network_up = true;
       //WiFi.disconnect();  // Disconnect WiFi to prioritize Ethernet
@@ -118,6 +117,14 @@ void onWsEvent(AsyncWebSocket *server, AsyncWebSocketClient *client, AwsEventTyp
   switch (type) {
     case WS_EVT_CONNECT:
       Serial.printf("WebSocket client #%u connected from %s\n", client->id(), client->remoteIP().toString().c_str());
+      {
+        StaticJsonDocument<256> doc;
+        doc["type"] = "time_offset";
+        doc["offset_minutes"] = config.time_offset_minutes;
+        String json;
+        serializeJson(doc, json);
+        client->text(json);
+      }
       break;
     case WS_EVT_DISCONNECT:
       Serial.printf("WebSocket client #%u disconnected\n", client->id());
@@ -142,6 +149,21 @@ void onWsEvent(AsyncWebSocket *server, AsyncWebSocketClient *client, AwsEventTyp
             const char *programID = doc["programID"];
             if (programID) handleGetProgram(client, programID);
             else sendErrorResponse(client, "", "Missing programID");
+          } else if (command && strcmp(command, "set_time_offset") == 0) {
+            int offset = doc["offset_minutes"] | 0;
+            if (offset >= -720 && offset <= 840) {
+              config.time_offset_minutes = offset;
+              saveConfiguration("/config.json", config);
+              Serial.printf("Time offset updated to %d minutes\n", offset);
+              StaticJsonDocument<256> response;
+              response["type"] = "time_offset";
+              response["offset_minutes"] = config.time_offset_minutes;
+              String json;
+              serializeJson(response, json);
+              ws.textAll(json);
+            } else {
+              Serial.println("Invalid time offset received: " + String(offset));
+            }
           }
         } else {
           Serial.println("Failed to parse WebSocket JSON: " + String(error.c_str()));
@@ -289,13 +311,14 @@ void sendTimeToClients() {
     unsigned long freeHeap = ESP.getFreeHeap();
     unsigned long usedHeap = totalHeap - freeHeap;
 
-    String json = "{";
-    json += "\"type\":\"time\",";
-    json += "\"epoch\":" + String(now) + ",";
-    json += "\"mem_used\":" + String(usedHeap) + ",";
-    json += "\"mem_total\":" + String(totalHeap);
-    json += "}";
-
+    StaticJsonDocument<512> doc;
+    doc["type"] = "time";
+    doc["epoch"] = now;
+    doc["mem_used"] = usedHeap;
+    doc["mem_total"] = totalHeap;
+    doc["offset_minutes"] = config.time_offset_minutes;
+    String json;
+    serializeJson(doc, json);
     ws.textAll(json);
   }
 }
@@ -361,28 +384,58 @@ bool checkInternetConnectivity() {
 
 bool syncNTPTime() {
   static bool ntpConfigured = false;
+  static int retryCount = 0;
+  const int maxRetries = 5;
+  const char *ntpServers[] = { "216.239.35.0", "pool.ntp.org", "time.google.com", "time.nist.gov" };
+
   if (!ntpConfigured && network_up) {
-    Serial.println("Configuring NTP with server: " + String(config.ntp_server));
-    if (config.ntp_server && strlen(config.ntp_server) > 0) {
-      configTime(0, 0, config.ntp_server);
-      ntpConfigured = true;
-      // Test NTP server reachability
-      WiFiUDP udp;
-      udp.begin(123);
-      if (udp.beginPacket(config.ntp_server, 123)) {
-        Serial.println("NTP server reachable");
-        udp.endPacket();
+    delay(2000);
+    for (int i = 0; i < maxRetries; i++) {
+      const char *currentServer = ntpServers[retryCount % 4];
+      Serial.println("Configuring NTP with server: " + String(currentServer));
+      if (currentServer && strlen(currentServer) > 0) {
+        configTime(0, 0, currentServer);
+        WiFiUDP udp;
+        if (!udp.begin(123)) {
+          Serial.println("Failed to bind UDP port 123");
+          retryCount++;
+          delay(2000);
+          continue;
+        }
+        Serial.println("Attempting to reach NTP server: " + String(currentServer));
+        IPAddress serverIP;
+        if (WiFi.hostByName(currentServer, serverIP)) {
+          Serial.println("DNS resolved: " + String(currentServer) + " to " + serverIP.toString());
+        } else if (!serverIP.fromString(currentServer)) {
+          Serial.println("DNS resolution failed for: " + String(currentServer));
+          retryCount++;
+          udp.stop();
+          delay(2000);
+          continue;
+        }
+        if (udp.beginPacket(serverIP, 123)) {
+          Serial.println("NTP server reachable: " + String(currentServer));
+          udp.endPacket();
+          ntpConfigured = true;
+          retryCount = 0;
+          udp.stop();
+          return true;
+        } else {
+          Serial.println("Failed to reach NTP server: " + String(currentServer));
+          retryCount++;
+        }
+        udp.stop();
+        delay(2000);
       } else {
-        Serial.println("Failed to reach NTP server");
+        Serial.println("NTP server invalid, skipping");
+        return false;
       }
-      udp.stop();
-    } else {
-      Serial.println("NTP server invalid, skipping");
-      return false;
     }
+    Serial.println("All NTP retries failed");
   }
   return ntpConfigured;
 }
+
 void setTimeFromClient(const char *timeStr) {
   if (timeStr) {
     struct tm tm;
@@ -392,7 +445,7 @@ void setTimeFromClient(const char *timeStr) {
         == 6) {
       tm.tm_year -= 1900;
       tm.tm_mon -= 1;
-      tm.tm_isdst = -1;  // No DST, UTC
+      tm.tm_isdst = -1;
       time_t t = mktime(&tm);
       if (t != -1) {
         struct timeval tv = { .tv_sec = t, .tv_usec = 0 };
@@ -442,6 +495,7 @@ void readSettings() {
     strlcpy(config.mdns_hostname, "gday", sizeof(config.mdns_hostname));
     strlcpy(config.ntp_server, "pool.ntp.org", sizeof(config.ntp_server));
     strlcpy(config.internet_check_host, "1.1.1.1", sizeof(config.internet_check_host));
+    config.time_offset_minutes = 0;
     return;
   }
   StaticJsonDocument<512> doc;
@@ -458,6 +512,7 @@ void readSettings() {
   strlcpy(config.mdns_hostname, doc["mdns_hostname"] | "gday", sizeof(config.mdns_hostname));
   strlcpy(config.ntp_server, doc["ntp_server"] | "pool.ntp.org", sizeof(config.ntp_server));
   strlcpy(config.internet_check_host, doc["internet_check_host"] | "1.1.1.1", sizeof(config.internet_check_host));
+  config.time_offset_minutes = doc["time_offset_minutes"] | 0;
   file.close();
 }
 
@@ -473,6 +528,7 @@ void saveConfiguration(const char *filename, const Config &config) {
   doc["mdns_hostname"] = config.mdns_hostname;
   doc["ntp_server"] = config.ntp_server;
   doc["internet_check_host"] = config.internet_check_host;
+  doc["time_offset_minutes"] = config.time_offset_minutes;
   if (serializeJson(doc, file) == 0) {
     Serial.println(F("Failed to write to file"));
   } else {
@@ -487,7 +543,7 @@ void WIFI_Connect() {
   WiFi.mode(WIFI_STA);
   WiFi.begin(config.ssid, config.password);
   unsigned long startAttemptTime = millis();
-  const unsigned long timeout = 10000;  // 10 seconds timeout
+  const unsigned long timeout = 10000;
   if (WiFi.status() != WL_CONNECTED) {
     Serial.println("\nFailed to connect to WiFi");
   } else {
@@ -516,19 +572,16 @@ void setup() {
   server.serveStatic("/", LittleFS, "/").setDefaultFile("index.html");
 
   server.onNotFound([](AsyncWebServerRequest *request) {
-    // Ignore requests for static assets (e.g., /assets/*)
     if (request->url().startsWith("/assets/")) {
       request->send(404, "text/plain", "Asset not found");
       return;
     }
-    // Serve index.html for all other routes
     if (LittleFS.exists("/index.html")) {
       request->send(LittleFS, "/index.html", "text/html");
     } else {
       request->send(404, "text/plain", "Index file not found");
     }
   });
-
 
   server.on("/getFile", HTTP_GET, [](AsyncWebServerRequest *request) {
     if (request->hasParam("filename")) {
@@ -561,9 +614,10 @@ void setup() {
   server.addHandler(&ws);
   server.begin();
 }
+
 bool isTimeSynced() {
   time_t now = time(nullptr);
-  return now > 946684800;  // After Jan 1, 2000
+  return now > 946684800;
 }
 
 void loop() {
@@ -576,14 +630,14 @@ void loop() {
   if (millis() - lastNTPSyncCheck >= 30000 && network_up) {
     if (!isTimeSynced()) {
       Serial.println("NTP sync failed, retrying...");
-      syncNTPTime();  // Retry NTP sync
+      syncNTPTime();
     }
     lastNTPSyncCheck = millis();
   }
   if (millis() - print_time_count >= 10000) {
     time_t now = time(nullptr);
     char timeStr[50];
-    strftime(timeStr, sizeof(timeStr), "%Y-%m-%d %H:%M:%S", gmtime(&now));  // UTC time
+    strftime(timeStr, sizeof(timeStr), "%Y-%m-%d %H:%M:%S", gmtime(&now));
     Serial.print("UTC Time: ");
     Serial.print(timeStr);
     Serial.print(" WiFi IP address: ");
