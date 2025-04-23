@@ -25,6 +25,7 @@ function ProgramEditor({ wsRef, isWsReady }) {
   const location = useLocation();
   const navigate = useNavigate();
   const hasFetched = useRef(false);
+  const fileInputRef = useRef(null);
 
   // List of days for checkboxes
   const daysOfWeek = [
@@ -206,9 +207,131 @@ function ProgramEditor({ wsRef, isWsReady }) {
     }
   };
 
+  // Handle Import button click
+  const handleImport = () => {
+    fileInputRef.current.click();
+  };
+
+  // Handle file selection and import
+  const handleFileSelect = (event) => {
+    const file = event.target.files[0];
+    if (!file) return;
+
+    if (!file.name.endsWith('.json')) {
+      setError('Please select a JSON file');
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const content = JSON.parse(e.target.result);
+        setName(content.name || '');
+        setEnabled(content.enabled || false);
+        setOutput(content.output || 'A');
+        setStartDate(content.startDate || '');
+        setStartDateEnabled(content.startDateEnabled !== false);
+        setEndDate(content.endDate || '');
+        setEndDateEnabled(content.endDateEnabled !== false);
+        setStartTime(content.startTime || '');
+        setStartTimeEnabled(content.startTimeEnabled !== false);
+        setEndTime(content.endTime || '');
+        setEndTimeEnabled(content.endTimeEnabled !== false);
+        setSelectedDays(content.selectedDays || []);
+        setDaysPerWeekEnabled(content.daysPerWeekEnabled !== false);
+        setTrigger(content.trigger || 'Manual');
+        setRunTime({
+          seconds: content.runTime?.seconds?.toString() || '',
+          minutes: content.runTime?.minutes?.toString() || '',
+          hours: content.runTime?.hours?.toString() || '',
+        });
+        setStopTime({
+          seconds: content.stopTime?.seconds?.toString() || '',
+          minutes: content.stopTime?.minutes?.toString() || '',
+          hours: content.stopTime?.hours?.toString() || '',
+        });
+        setStatus('Program imported successfully');
+        setError(null);
+      } catch (err) {
+        setError('Failed to parse JSON file');
+        setStatus('');
+      }
+    };
+    reader.onerror = () => {
+      setError('Error reading file');
+      setStatus('');
+    };
+    reader.readAsText(file);
+    // Reset file input
+    event.target.value = '';
+  };
+
+  // Handle Export button click
+  const handleExport = () => {
+    const programContent = {
+      name,
+      enabled,
+      output,
+      startDate: startDateEnabled ? startDate : '',
+      startDateEnabled,
+      endDate: endDateEnabled ? endDate : '',
+      endDateEnabled,
+      startTime: startTimeEnabled ? startTime : '',
+      startTimeEnabled,
+      endTime: endTimeEnabled ? endTime : '',
+      endTimeEnabled,
+      selectedDays: daysPerWeekEnabled ? selectedDays : [],
+      daysPerWeekEnabled,
+      trigger,
+      ...(trigger === 'Cycle Timer' && {
+        runTime: {
+          seconds: parseInt(runTime.seconds) || 0,
+          minutes: parseInt(runTime.minutes) || 0,
+          hours: parseInt(runTime.hours) || 0,
+        },
+        stopTime: {
+          seconds: parseInt(stopTime.seconds) || 0,
+          minutes: parseInt(stopTime.minutes) || 0,
+          hours: parseInt(stopTime.hours) || 0,
+        },
+      }),
+    };
+
+    try {
+      const json = JSON.stringify(programContent, null, 2);
+      const blob = new Blob([json], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `program_${programID || 'new'}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+      setStatus('Program exported successfully');
+      setError(null);
+    } catch (err) {
+      setError('Failed to export program');
+      setStatus('');
+    }
+  };
+
   return (
     <div>
       <h1 className="Title">Program Editor</h1>
+      <div className="Title">
+        <button className="save-button" onClick={handleImport}>
+          Import
+        </button>   
+        <button className="save-button" onClick={handleExport}>
+          Export
+        </button>
+        <input
+          type="file"
+          ref={fileInputRef}
+          style={{ display: 'none' }}
+          accept=".json"
+          onChange={handleFileSelect}
+        />
+      </div>
       {error && <div className="error">{error}</div>}
       {status && <div className="status">{status}</div>}
       <div className="form-group">
@@ -464,10 +587,7 @@ function ProgramEditor({ wsRef, isWsReady }) {
           <div className="manual-message">Manually powered on</div>
         )}
       </div>
-      <button
-        className="save-button"
-        onClick={saveProgram}
-      >
+      <button className="save-button" onClick={saveProgram}>
         Save Program
       </button>
     </div>

@@ -191,6 +191,7 @@ table {
   border: none;
   border-radius: 4px;
   cursor: pointer;
+  margin: 5px;
 }
 
 .save-button:hover {
