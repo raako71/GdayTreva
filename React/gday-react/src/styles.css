@@ -16,10 +16,15 @@
   color: #009a0a;
 }
 
-.Title {
+.Title{
   margin: auto;
   width: 100%;
   text-align: center;
+}
+
+.new-program-link {
+  text-align: center;
+  margin-top: 10px;
 }
 
 .time-bar {

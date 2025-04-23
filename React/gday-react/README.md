@@ -16,3 +16,4 @@ R0.13: Favicon.
 R0.14: Route for Program save. Toggles for program editor.
 R0.15: Cycle Timer.
 R0.16: NTP Offset.
+R0.17: Program bugs.
