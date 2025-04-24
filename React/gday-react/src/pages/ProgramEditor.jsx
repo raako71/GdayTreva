@@ -207,6 +207,13 @@ function ProgramEditor({ wsRef, isWsReady }) {
     }
   };
 
+  // Handle Cancel button click
+  const cancelEdit = () => {
+    setError(null);
+    setStatus('');
+    navigate('/programs');
+  };
+
   // Handle Import button click
   const handleImport = () => {
     fileInputRef.current.click();
@@ -587,9 +594,14 @@ function ProgramEditor({ wsRef, isWsReady }) {
           <div className="manual-message">Manually powered on</div>
         )}
       </div>
-      <button className="save-button" onClick={saveProgram}>
-        Save Program
-      </button>
+      <div className="button-group">
+        <button className="save-button" onClick={saveProgram}>
+          Save Program
+        </button>
+        <button className="cancel-button" onClick={cancelEdit}>
+          Cancel
+        </button>
+      </div>
     </div>
   );
 }

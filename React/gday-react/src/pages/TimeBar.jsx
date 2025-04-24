@@ -7,6 +7,8 @@ function TimeBar({ message, wsRef }) {
   const [isOverlayOpen, setIsOverlayOpen] = useState(false);
   const [offsetError, setOffsetError] = useState(null);
   const timeoutRef = useRef(null);
+  const menuRef = useRef(null);
+  const buttonRef = useRef(null);
 
   // Format time with ESP32's offset
   const formatTime = (epoch, offsetMinutes) => {
@@ -44,7 +46,7 @@ function TimeBar({ message, wsRef }) {
   };
 
   const toggleMenu = () => {
-    setIsMenuOpen(true);
+    setIsMenuOpen((prev) => !prev);
     if (isOverlayOpen) setIsOverlayOpen(false);
     if (timeoutRef.current) {
       clearTimeout(timeoutRef.current);
@@ -62,6 +64,20 @@ function TimeBar({ message, wsRef }) {
     if (timeoutRef.current) {
       clearTimeout(timeoutRef.current);
       timeoutRef.current = null;
+    }
+  };
+
+  const closeMenu = () => {
+    setIsMenuOpen(false);
+    if (timeoutRef.current) {
+      clearTimeout(timeoutRef.current);
+      timeoutRef.current = null;
+    }
+  };
+
+  const handleBackdropClick = (e) => {
+    if (!menuRef.current?.contains(e.target) && !buttonRef.current?.contains(e.target)) {
+      closeMenu();
     }
   };
 
@@ -114,10 +130,16 @@ function TimeBar({ message, wsRef }) {
       <div>-</div>
       <div>Memory Free: {memPercent}%</div>
       <button
+        ref={buttonRef}
         className="hamburger"
         onMouseEnter={toggleMenu}
         onMouseLeave={closeMenuWithDelay}
+        onClick={toggleMenu}
+        onFocus={toggleMenu}
+        onBlur={closeMenuWithDelay}
         aria-label="Toggle navigation menu"
+        aria-expanded={isMenuOpen}
+        aria-controls="navigation-menu"
       >
         <svg
           className="hamburger-icon"
@@ -136,38 +158,57 @@ function TimeBar({ message, wsRef }) {
       </button>
       {isMenuOpen && (
         <div
-          className="menu"
-          onMouseEnter={cancelCloseMenu}
-          onMouseLeave={closeMenuWithDelay}
+          className="menu-backdrop"
+          onClick={handleBackdropClick}
+          role="presentation"
         >
-          <Link
-            to="/"
-            className="menu-item"
-            onClick={() => setIsMenuOpen(false)}
+          <div
+            ref={menuRef}
+            id="navigation-menu"
+            className="menu"
+            onMouseEnter={cancelCloseMenu}
+            onMouseLeave={closeMenuWithDelay}
+            onFocus={cancelCloseMenu}
+            onBlur={closeMenuWithDelay}
+            role="menu"
           >
-            Home
-          </Link>
-          <Link
-            to="/settings"
-            className="menu-item"
-            onClick={() => setIsMenuOpen(false)}
-          >
-            Settings
-          </Link>
-          <Link
-            to="/graph"
-            className="menu-item"
-            onClick={() => setIsMenuOpen(false)}
-          >
-            Graph
-          </Link>
-          <Link
-            to="/programs"
-            className="menu-item"
-            onClick={() => setIsMenuOpen(false)}
-          >
-            Programs
-          </Link>
+            <Link
+              to="/"
+              className="menu-item"
+              onClick={closeMenu}
+              role="menuitem"
+              tabIndex={0}
+            >
+              Home
+            </Link>
+            <Link
+              to="/settings"
+              className="menu-item"
+              onClick={closeMenu}
+              role="menuitem"
+              tabIndex={0}
+            >
+              Settings
+            </Link>
+            <Link
+              to="/graph"
+              className="menu-item"
+              onClick={closeMenu}
+              role="menuitem"
+              tabIndex={0}
+            >
+              Graph
+            </Link>
+            <Link
+              to="/programs"
+              className="menu-item"
+              onClick={closeMenu}
+              role="menuitem"
+              tabIndex={0}
+            >
+              Programs
+            </Link>
+          </div>
         </div>
       )}
       {isOverlayOpen && (
