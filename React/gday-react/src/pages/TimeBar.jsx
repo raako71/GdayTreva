@@ -1,43 +1,40 @@
 import '../styles.css';
 import { Link } from 'react-router-dom';
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 
 function TimeBar({ message, wsRef }) {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [isOverlayOpen, setIsOverlayOpen] = useState(false);
   const [offsetError, setOffsetError] = useState(null);
+  const timeoutRef = useRef(null);
 
   // Format time with ESP32's offset
   const formatTime = (epoch, offsetMinutes) => {
     if (!epoch || isNaN(epoch) || epoch === 0 || offsetMinutes == null || isNaN(offsetMinutes)) {
-      return 'Waiting for time data...'; // Graceful message for initial state
+      return 'Waiting for time data...';
     }
-    // Convert epoch (seconds) to milliseconds and apply offset (minutes to seconds)
     const adjustedEpochMs = (epoch + offsetMinutes * 60) * 1000;
     const date = new Date(adjustedEpochMs);
     if (isNaN(date.getTime())) {
       console.warn('Invalid date calculated:', { epoch, offsetMinutes, adjustedEpochMs });
       return 'Invalid time';
     }
-    //console.log('Time calculation:', { epoch, offsetMinutes, adjustedEpochMs, date: date.toISOString() });
-    // Use UTC methods to avoid browser timezone interference
     const day = String(date.getUTCDate()).padStart(2, '0');
     const month = String(date.getUTCMonth() + 1).padStart(2, '0');
     const year = date.getUTCFullYear();
     const hours = String(date.getUTCHours()).padStart(2, '0');
     const minutes = String(date.getUTCMinutes()).padStart(2, '0');
     const seconds = String(date.getUTCSeconds()).padStart(2, '0');
-    
-    // Format offset as +HH:mm
+
     const offsetHours = Math.floor(Math.abs(offsetMinutes) / 60);
     const offsetMins = Math.abs(offsetMinutes) % 60;
     const offsetSign = offsetMinutes >= 0 ? '+' : '-';
     const offsetStr = `${offsetSign}${String(offsetHours).padStart(2, '0')}:${String(offsetMins).padStart(2, '0')}`;
-    
+
     return `${day}/${month}/${year}, ${hours}:${minutes}:${seconds} (${offsetStr})`;
   };
 
-  // Format offset as +HH:mm for overlay
+  // Format offset for overlay
   const formatOffset = (minutes) => {
     if (minutes == null || isNaN(minutes)) return 'N/A';
     const hours = Math.floor(Math.abs(minutes) / 60);
@@ -47,8 +44,25 @@ function TimeBar({ message, wsRef }) {
   };
 
   const toggleMenu = () => {
-    setIsMenuOpen(!isMenuOpen);
+    setIsMenuOpen(true);
     if (isOverlayOpen) setIsOverlayOpen(false);
+    if (timeoutRef.current) {
+      clearTimeout(timeoutRef.current);
+      timeoutRef.current = null;
+    }
+  };
+
+  const closeMenuWithDelay = () => {
+    timeoutRef.current = setTimeout(() => {
+      setIsMenuOpen(false);
+    }, 500);
+  };
+
+  const cancelCloseMenu = () => {
+    if (timeoutRef.current) {
+      clearTimeout(timeoutRef.current);
+      timeoutRef.current = null;
+    }
   };
 
   const toggleOverlay = () => {
@@ -101,7 +115,8 @@ function TimeBar({ message, wsRef }) {
       <div>Memory Free: {memPercent}%</div>
       <button
         className="hamburger"
-        onClick={toggleMenu}
+        onMouseEnter={toggleMenu}
+        onMouseLeave={closeMenuWithDelay}
         aria-label="Toggle navigation menu"
       >
         <svg
@@ -120,7 +135,11 @@ function TimeBar({ message, wsRef }) {
         </svg>
       </button>
       {isMenuOpen && (
-        <div className="menu">
+        <div
+          className="menu"
+          onMouseEnter={cancelCloseMenu}
+          onMouseLeave={closeMenuWithDelay}
+        >
           <Link
             to="/"
             className="menu-item"
