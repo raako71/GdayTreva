@@ -11,13 +11,17 @@
 
 #define FORMAT_LITTLEFS_IF_FAILED true
 
+// Pin definitions for outputs A and B
+#define OUTPUT_A_PIN 4
+#define OUTPUT_B_PIN 12
+
 struct Config {
   char ssid[32];
   char password[64];
   char mdns_hostname[32];
   char ntp_server[32];
   char internet_check_host[32];
-  int time_offset_minutes; // Added for time offset
+  int time_offset_minutes;
 };
 
 Config config;
@@ -35,6 +39,21 @@ const unsigned long ONE_DAY_MS = 24 * 60 * 60 * 1000UL;
 unsigned long totalHeap = 0;
 int numPrograms = 10;
 
+// Output states
+bool outputAState = false;
+bool outputBState = false;
+
+// Cycle Timer state for each output
+struct CycleState {
+  bool isRunning;
+  unsigned long lastSwitchTime;
+  bool isOnPhase;
+  int activeProgram;
+};
+CycleState cycleStateA = {false, 0, false, -1};
+CycleState cycleStateB = {false, 0, false, -1};
+
+// Handles network events (Ethernet/WiFi connect/disconnect)
 void networkEvent(arduino_event_id_t event) {
   switch (event) {
     case ARDUINO_EVENT_ETH_START:
@@ -50,8 +69,6 @@ void networkEvent(arduino_event_id_t event) {
       Serial.println("ETH DNS: " + ETH.dnsIP().toString());
       eth_connected = true;
       network_up = true;
-      //WiFi.disconnect();  // Disconnect WiFi to prioritize Ethernet
-      //wifi_connected = false;
       checkInternetConnectivity();
       syncNTPTime();
       if (!MDNS.begin(config.mdns_hostname)) {
@@ -113,6 +130,7 @@ void networkEvent(arduino_event_id_t event) {
   }
 }
 
+// Handles WebSocket events (connect, disconnect, data)
 void onWsEvent(AsyncWebSocket *server, AsyncWebSocketClient *client, AwsEventType type, void *arg, uint8_t *data, size_t len) {
   switch (type) {
     case WS_EVT_CONNECT:
@@ -135,9 +153,9 @@ void onWsEvent(AsyncWebSocket *server, AsyncWebSocketClient *client, AwsEventTyp
         StaticJsonDocument<512> doc;
         DeserializationError error = deserializeJson(doc, (char *)data, len);
         if (!error) {
-          const char *command = doc["command"];
+          const char *command = doc["command"].as<const char*>();
           if (command && strcmp(command, "sync_time") == 0) {
-            const char *timeStr = doc["time"];
+            const char *timeStr = doc["time"].as<const char*>();
             if (timeStr) {
               setTimeFromClient(timeStr);
             }
@@ -146,11 +164,14 @@ void onWsEvent(AsyncWebSocket *server, AsyncWebSocketClient *client, AwsEventTyp
           } else if (command && strcmp(command, "save_program") == 0) {
             handleSaveProgram(client, doc);
           } else if (strcmp(command, "get_program") == 0) {
-            const char *programID = doc["programID"];
+            const char *programID = doc["programID"].as<const char*>();
             if (programID) handleGetProgram(client, programID);
             else sendErrorResponse(client, "", "Missing programID");
           } else if (command && strcmp(command, "set_time_offset") == 0) {
-            int offset = doc["offset_minutes"] | 0;
+            int offset = 0;
+            if (doc["offset_minutes"].is<int>()) {
+              offset = doc["offset_minutes"].as<int>();
+            }
             if (offset >= -720 && offset <= 840) {
               config.time_offset_minutes = offset;
               saveConfiguration("/config.json", config);
@@ -176,6 +197,7 @@ void onWsEvent(AsyncWebSocket *server, AsyncWebSocketClient *client, AwsEventTyp
   }
 }
 
+// Sends error response to WebSocket client
 void sendErrorResponse(AsyncWebSocketClient *client, const char *programID, const char *message) {
   StaticJsonDocument<512> response;
   response["type"] = "get_program_response";
@@ -188,6 +210,7 @@ void sendErrorResponse(AsyncWebSocketClient *client, const char *programID, cons
   Serial.printf("Sent error to client #%u: %s\n", client->id(), message);
 }
 
+// Finds the next available program ID (01-10)
 String getNextProgramID() {
   for (int i = 1; i <= 10; i++) {
     String idStr = String(i);
@@ -200,6 +223,7 @@ String getNextProgramID() {
   return "";
 }
 
+// Sends program save response to WebSocket client
 void sendProgramResponse(AsyncWebSocketClient *client, bool success, const char *message, const char *programID) {
   StaticJsonDocument<512> response;
   response["type"] = "save_program_response";
@@ -212,6 +236,7 @@ void sendProgramResponse(AsyncWebSocketClient *client, bool success, const char 
   Serial.printf("Sent save_program_response to client #%u: %s\n", client->id(), message);
 }
 
+// Retrieves a program by ID and sends it to the WebSocket client
 void handleGetProgram(AsyncWebSocketClient *client, const char *programID) {
   String idStr = String(programID);
   if (idStr.length() != 2 || idStr < "01" || idStr > "10") {
@@ -252,9 +277,10 @@ void handleGetProgram(AsyncWebSocketClient *client, const char *programID) {
   Serial.printf("Sent program %s to client #%u\n", programID, client->id());
 }
 
+// Saves a program received via WebSocket
 void handleSaveProgram(AsyncWebSocketClient *client, const JsonDocument &doc) {
-  const char *programID = doc["programID"];
-  const char *content = doc["content"];
+  const char *programID = doc["programID"].as<const char*>();
+  const char *content = doc["content"].as<const char*>();
   if (!programID || !content) {
     sendProgramResponse(client, false, "Missing programID or content", "");
     return;
@@ -305,6 +331,7 @@ void handleSaveProgram(AsyncWebSocketClient *client, const JsonDocument &doc) {
   sendProgramResponse(client, true, "Program saved successfully", targetID.c_str());
 }
 
+// Sends current time and memory usage to all WebSocket clients
 void sendTimeToClients() {
   if (ws.count() > 0) {
     time_t now = time(nullptr);
@@ -323,6 +350,7 @@ void sendTimeToClients() {
   }
 }
 
+// Sends network information to a WebSocket client
 void sendNetworkInfo(AsyncWebSocketClient *client) {
   String wifi_ip = wifi_connected ? WiFi.localIP().toString() : "N/A";
   String eth_ip = eth_connected ? ETH.localIP().toString() : "N/A";
@@ -360,6 +388,7 @@ void sendNetworkInfo(AsyncWebSocketClient *client) {
   Serial.println("Sent network info: " + json);
 }
 
+// Checks internet connectivity by connecting to a host
 bool checkInternetConnectivity() {
   const char *host = config.internet_check_host;
   const int port = 53;
@@ -382,6 +411,7 @@ bool checkInternetConnectivity() {
   }
 }
 
+// Syncs time with NTP servers
 bool syncNTPTime() {
   static bool ntpConfigured = false;
   static int retryCount = 0;
@@ -436,6 +466,7 @@ bool syncNTPTime() {
   return ntpConfigured;
 }
 
+// Sets system time from a WebSocket client
 void setTimeFromClient(const char *timeStr) {
   if (timeStr) {
     struct tm tm;
@@ -460,6 +491,7 @@ void setTimeFromClient(const char *timeStr) {
   }
 }
 
+// Checks if internet connectivity should be retested
 int shouldCheckInternet() {
   if (network_up && !internet_connected) {
     if (millis() - lastInternetCheck >= internetCheckInterval) {
@@ -470,6 +502,7 @@ int shouldCheckInternet() {
   return 0;
 }
 
+// Writes a file to LittleFS
 void writeFile(const char *path, const char *message) {
   Serial.printf("Writing file: %s\r\n", path);
   File file = LittleFS.open(path, FILE_WRITE);
@@ -485,6 +518,7 @@ void writeFile(const char *path, const char *message) {
   file.close();
 }
 
+// Reads configuration from LittleFS
 void readSettings() {
   Serial.println("Reading config");
   File file = LittleFS.open("/config.json");
@@ -507,15 +541,16 @@ void readSettings() {
     return;
   }
   Serial.println("Read Config.");
-  strlcpy(config.ssid, doc["ssid"] | "defaultSSID", sizeof(config.ssid));
-  strlcpy(config.password, doc["password"] | "defaultPass", sizeof(config.password));
-  strlcpy(config.mdns_hostname, doc["mdns_hostname"] | "gday", sizeof(config.mdns_hostname));
-  strlcpy(config.ntp_server, doc["ntp_server"] | "pool.ntp.org", sizeof(config.ntp_server));
-  strlcpy(config.internet_check_host, doc["internet_check_host"] | "1.1.1.1", sizeof(config.internet_check_host));
-  config.time_offset_minutes = doc["time_offset_minutes"] | 0;
+  strlcpy(config.ssid, doc["ssid"].as<const char*>() ?: "defaultSSID", sizeof(config.ssid));
+  strlcpy(config.password, doc["password"].as<const char*>() ?: "defaultPass", sizeof(config.password));
+  strlcpy(config.mdns_hostname, doc["mdns_hostname"].as<const char*>() ?: "gday", sizeof(config.mdns_hostname));
+  strlcpy(config.ntp_server, doc["ntp_server"].as<const char*>() ?: "pool.ntp.org", sizeof(config.ntp_server));
+  strlcpy(config.internet_check_host, doc["internet_check_host"].as<const char*>() ?: "1.1.1.1", sizeof(config.internet_check_host));
+  config.time_offset_minutes = doc["time_offset_minutes"].as<int>();
   file.close();
 }
 
+// Saves configuration to LittleFS
 void saveConfiguration(const char *filename, const Config &config) {
   File file = LittleFS.open(filename, FILE_WRITE);
   if (!file) {
@@ -537,6 +572,7 @@ void saveConfiguration(const char *filename, const Config &config) {
   file.close();
 }
 
+// Connects to WiFi
 void WIFI_Connect() {
   Serial.print("\nConnecting to ");
   Serial.println(config.ssid);
@@ -549,6 +585,216 @@ void WIFI_Connect() {
   } else {
     Serial.println("\nWiFi connected");
   }
+}
+
+// Parses ISO 8601 date-time (e.g., "2025-04-27T06:00")
+time_t parseISO8601(const char* dateTime) {
+  struct tm tm = {0};
+  int year, month, day, hour, minute;
+  if (sscanf(dateTime, "%d-%d-%dT%d:%d", &year, &month, &day, &hour, &minute) != 5) {
+    return 0;
+  }
+  tm.tm_year = year - 1900;
+  tm.tm_mon = month - 1;
+  tm.tm_mday = day;
+  tm.tm_hour = hour;
+  tm.tm_min = minute;
+  tm.tm_sec = 0;
+  tm.tm_isdst = -1;
+  return mktime(&tm);
+}
+
+// Gets current time adjusted by offset
+time_t getAdjustedTime() {
+  time_t now = time(nullptr);
+  return now + (config.time_offset_minutes * 60);
+}
+
+// Checks if a program is active based on date, time, and day
+bool isProgramActive(const JsonDocument& doc, int progNum) {
+  bool enabled = doc["enabled"].as<bool>();
+  if (!enabled) return false;
+
+  time_t now = getAdjustedTime();
+  struct tm* timeinfo = localtime(&now);
+
+  bool startDateEnabled = doc["startDateEnabled"].as<bool>();
+  const char* startDate = doc["startDate"].as<const char*>();
+  if (startDateEnabled && startDate && strlen(startDate) > 0) {
+    time_t start = parseISO8601(startDate);
+    if (now < start) return false;
+  }
+
+  bool endDateEnabled = doc["endDateEnabled"].as<bool>();
+  const char* endDate = doc["endDate"].as<const char*>();
+  if (endDateEnabled && endDate && strlen(endDate) > 0) {
+    time_t end = parseISO8601(endDate);
+    if (now > end) return false;
+  }
+
+  bool startTimeEnabled = doc["startTimeEnabled"].as<bool>();
+  bool endTimeEnabled = doc["endTimeEnabled"].as<bool>();
+  const char* startTime = doc["startTime"].as<const char*>();
+  const char* endTime = doc["endTime"].as<const char*>();
+  if (startTimeEnabled && endTimeEnabled && startTime && endTime && strlen(startTime) > 0 && strlen(endTime) > 0) {
+    int startHour, startMinute, endHour, endMinute;
+    sscanf(startTime, "%d:%d", &startHour, &startMinute);
+    sscanf(endTime, "%d:%d", &endHour, &endMinute);
+    int nowMinutes = timeinfo->tm_hour * 60 + timeinfo->tm_min;
+    int startMinutes = startHour * 60 + startMinute;
+    int endMinutes = endHour * 60 + endMinute;
+    if (nowMinutes < startMinutes || nowMinutes > endMinutes) return false;
+  }
+
+  bool daysPerWeekEnabled = doc["daysPerWeekEnabled"].as<bool>();
+  if (daysPerWeekEnabled) {
+    JsonArrayConst selectedDays = doc["selectedDays"];
+    if (!selectedDays.isNull() && selectedDays.size() > 0) {
+      const char* days[] = {"Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"};
+      const char* currentDay = days[timeinfo->tm_wday];
+      bool dayMatch = false;
+      for (const char* day : selectedDays) {
+        if (strcmp(day, currentDay) == 0) {
+          dayMatch = true;
+          break;
+        }
+      }
+      if (!dayMatch) return false;
+    }
+  }
+
+  return true;
+}
+
+// Implements Cycle Timer trigger with startHigh option
+bool runCycleTimer(const JsonDocument& doc, CycleState& state, const char* output) {
+  JsonObjectConst runTime = doc["runTime"];
+  JsonObjectConst stopTime = doc["stopTime"];
+  if (runTime.isNull() || stopTime.isNull()) return false;
+
+  int runSeconds = (runTime["hours"].as<int>() * 3600) + (runTime["minutes"].as<int>() * 60) + (runTime["seconds"].as<int>());
+  int stopSeconds = (stopTime["hours"].as<int>() * 3600) + (stopTime["minutes"].as<int>() * 60) + (stopTime["seconds"].as<int>());
+  bool startHigh = doc["startHigh"].as<bool>();  // Default handled in frontend (true)
+  if (runSeconds == 0 || stopSeconds == 0) return false;  // Avoid infinite loops
+
+  unsigned long now = millis();
+  if (!state.isRunning) {
+    state.isRunning = true;
+    state.lastSwitchTime = now;
+    state.isOnPhase = startHigh;
+    Serial.printf("Cycle Timer started for %s, startHigh: %d\n", output, startHigh);
+    return state.isOnPhase;
+  }
+
+  unsigned long elapsed = now - state.lastSwitchTime;
+  if (state.isOnPhase && elapsed >= (unsigned long)runSeconds * 1000) {
+    state.isOnPhase = false;
+    state.lastSwitchTime = now;
+    Serial.printf("Cycle Timer for %s switched to off\n", output);
+    return false;
+  } else if (!state.isOnPhase && elapsed >= (unsigned long)stopSeconds * 1000) {
+    state.isOnPhase = true;
+    state.lastSwitchTime = now;
+    Serial.printf("Cycle Timer for %s switched to on\n", output);
+    return true;
+  }
+  return state.isOnPhase;
+}
+
+// Determines active programs and sets outputs A and B
+void updateOutputs() {
+  time_t now = getAdjustedTime();
+  if (now < 946684800) return;  // Ensure time is synced
+
+  int activeProgramA = -1;  // Lowest active program ID for output A
+  int activeProgramB = -1;  // Lowest active program ID for output B
+
+  // Check all programs (01 to 10)
+  for (int i = 1; i <= numPrograms; i++) {
+    String idStr = String(i);
+    if (i < 10) idStr = "0" + idStr;
+    String filename = "/program" + idStr + ".json";
+    if (!LittleFS.exists(filename)) continue;
+
+    File file = LittleFS.open(filename, FILE_READ);
+    if (!file) continue;
+
+    String content = file.readString();
+    file.close();
+
+    StaticJsonDocument<4096> doc;
+    DeserializationError error = deserializeJson(doc, content);
+    if (error) continue;
+
+    if (!isProgramActive(doc, i)) {
+      continue;
+    }
+
+    const char* output = doc["output"].as<const char*>() ?: "A";
+    if (strcmp(output, "A") == 0) {
+      if (activeProgramA == -1 || i < activeProgramA) {
+        activeProgramA = i;
+      }
+    } else if (strcmp(output, "B") == 0) {
+      if (activeProgramB == -1 || i < activeProgramB) {
+        activeProgramB = i;
+      }
+    }
+  }
+
+  // Set output A
+  if (activeProgramA != -1) {
+    int currentStateA = outputAState;
+    String filename = "/program" + String(activeProgramA < 10 ? "0" + String(activeProgramA) : String(activeProgramA)) + ".json";
+    File file = LittleFS.open(filename, FILE_READ);
+    String content = file.readString();
+    file.close();
+    StaticJsonDocument<4096> doc;
+    deserializeJson(doc, content);
+    const char* trigger = doc["trigger"].as<const char*>() ?: "Manual";
+    // Reset Cycle Timer if the active program has changed
+    if (cycleStateA.activeProgram != activeProgramA) {
+      cycleStateA = {false, 0, false, activeProgramA};
+      Serial.printf("Output A: New active program %d, resetting Cycle Timer\n", activeProgramA);
+    }
+    if (strcmp(trigger, "Manual") == 0) {
+      outputAState = true;
+    } else if (strcmp(trigger, "Cycle Timer") == 0) {
+      outputAState = runCycleTimer(doc, cycleStateA, "Output A");
+    }
+    if(currentStateA != outputAState) Serial.printf("Active program for A: %d, State: %d\n", activeProgramA, outputAState);
+  } else {
+    outputAState = false;
+    cycleStateA = {false, 0, false, -1};  // Reset Cycle Timer
+  }
+  digitalWrite(OUTPUT_A_PIN, outputAState ? HIGH : LOW);
+
+  // Set output B
+  if (activeProgramB != -1) {
+    int currentStateB = outputBState;
+    String filename = "/program" + String(activeProgramB < 10 ? "0" + String(activeProgramB) : String(activeProgramB)) + ".json";
+    File file = LittleFS.open(filename, FILE_READ);
+    String content = file.readString();
+    file.close();
+    StaticJsonDocument<4096> doc;
+    deserializeJson(doc, content);
+    const char* trigger = doc["trigger"].as<const char*>() ?: "Manual";
+    // Reset Cycle Timer if the active program has changed
+    if (cycleStateB.activeProgram != activeProgramB) {
+      cycleStateB = {false, 0, false, activeProgramB};
+      Serial.printf("Output B: New active program %d, resetting Cycle Timer\n", activeProgramB);
+    }
+    if (strcmp(trigger, "Manual") == 0) {
+      outputBState = true;
+    } else if (strcmp(trigger, "Cycle Timer") == 0) {
+      outputBState = runCycleTimer(doc, cycleStateB, "Output B");
+    }
+    if(currentStateB != outputBState) Serial.printf("Output B change, Program: %d, State: %d\n", activeProgramB, outputBState);
+  } else {
+    outputBState = false;
+    cycleStateB = {false, 0, false, -1};  // Reset Cycle Timer
+  }
+  digitalWrite(OUTPUT_B_PIN, outputBState ? HIGH : LOW);
 }
 
 void setup() {
@@ -564,6 +810,11 @@ void setup() {
   readSettings();
   pinMode(5, OUTPUT);
   digitalWrite(5, HIGH);
+  // Initialize output pins
+  pinMode(OUTPUT_A_PIN, OUTPUT);
+  pinMode(OUTPUT_B_PIN, OUTPUT);
+  digitalWrite(OUTPUT_A_PIN, LOW);
+  digitalWrite(OUTPUT_B_PIN, LOW);
   delay(100);
   if (!ETH.begin(ETH_PHY_LAN8720, 0, 23, 18, 5, ETH_CLOCK_GPIO17_OUT)) {
     Serial.println("Ethernet failed to start");
@@ -652,6 +903,11 @@ void loop() {
   if (millis() - lastTimeSend > 1000) {
     sendTimeToClients();
     lastTimeSend = millis();
+  }
+  static unsigned long lastOutputUpdate = 0;
+  if (millis() - lastOutputUpdate > 1000) {
+    updateOutputs();
+    lastOutputUpdate = millis();
   }
   delay(10);
 }

@@ -20,6 +20,7 @@ function ProgramEditor({ wsRef, isWsReady }) {
   const [trigger, setTrigger] = useState('Manual');
   const [runTime, setRunTime] = useState({ seconds: '', minutes: '', hours: '' });
   const [stopTime, setStopTime] = useState({ seconds: '', minutes: '', hours: '' });
+  const [startHigh, setStartHigh] = useState(true);  // New state for Cycle Timer start phase
   const [error, setError] = useState(null);
   const [status, setStatus] = useState('');
   const location = useLocation();
