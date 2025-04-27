@@ -162,10 +162,6 @@ table {
   margin: 0;
 }
 
-.input-field[type="number"] {
-  -moz-appearance: textfield;
-}
-
 .checkbox-group {
   display: flex;
   flex-wrap: wrap;
@@ -373,4 +369,11 @@ input:checked + .enabled-slider:before {
 
 .cancel-button:hover {
   background-color: #4a4a4a;
+}
+
+.form-text {
+  font-size: 0.8em;
+  color: #666;
+  margin-top: 4px;
+  display: block;
 }

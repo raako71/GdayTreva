@@ -19,4 +19,5 @@ R0.16: NTP Offset.
 R0.17: Program bugs.
 R0.18: Export/Import.
 R0.19: CSS
-R0.20: menu hover.
+R0.20: Menu hover.
+R0.21: Add time to program start/stop, validate program

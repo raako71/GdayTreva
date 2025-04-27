@@ -11,9 +11,9 @@ function ProgramEditor({ wsRef, isWsReady }) {
   const [startDateEnabled, setStartDateEnabled] = useState(true);
   const [endDate, setEndDate] = useState('');
   const [endDateEnabled, setEndDateEnabled] = useState(true);
-  const [startTime, setStartTime] = useState('');
+  const [startTime, setStartTime] = useState('00:00');
   const [startTimeEnabled, setStartTimeEnabled] = useState(true);
-  const [endTime, setEndTime] = useState('');
+  const [endTime, setEndTime] = useState('23:59');
   const [endTimeEnabled, setEndTimeEnabled] = useState(true);
   const [selectedDays, setSelectedDays] = useState([]);
   const [daysPerWeekEnabled, setDaysPerWeekEnabled] = useState(true);
@@ -80,9 +80,9 @@ function ProgramEditor({ wsRef, isWsReady }) {
             setStartDateEnabled(content.startDateEnabled !== false);
             setEndDate(content.endDate || '');
             setEndDateEnabled(content.endDateEnabled !== false);
-            setStartTime(content.startTime || '');
+            setStartTime(content.startTime || '00:00');
             setStartTimeEnabled(content.startTimeEnabled !== false);
-            setEndTime(content.endTime || '');
+            setEndTime(content.endTime || '23:59');
             setEndTimeEnabled(content.endTimeEnabled !== false);
             setSelectedDays(content.selectedDays || []);
             setDaysPerWeekEnabled(content.daysPerWeekEnabled !== false);
@@ -144,10 +144,41 @@ function ProgramEditor({ wsRef, isWsReady }) {
     }));
   };
 
+  // Validate program data
+  const validateProgram = () => {
+    if (startDateEnabled && endDateEnabled && startDate && endDate) {
+      const start = new Date(startDate);
+      const end = new Date(endDate);
+      if (start >= end) {
+        return 'Start date and time must be before end date and time';
+      }
+    }
+    if (startTimeEnabled && endTimeEnabled && startTime && endTime) {
+      const [startHours, startMinutes] = startTime.split(':').map(Number);
+      const [endHours, endMinutes] = endTime.split(':').map(Number);
+      const startTotalMinutes = startHours * 60 + startMinutes;
+      const endTotalMinutes = endHours * 60 + endMinutes;
+      if (startTotalMinutes >= endTotalMinutes) {
+        return 'Daily end time must be after daily start time';
+      }
+    }
+    if (daysPerWeekEnabled && selectedDays.length === 0) {
+      return 'At least one day must be selected if days per week is enabled';
+    }
+    return null;
+  };
+
   // Sanitize and save the program via WebSocket
   const saveProgram = async () => {
     setError(null);
     setStatus('Saving...');
+
+    const validationError = validateProgram();
+    if (validationError) {
+      setError(validationError);
+      setStatus('');
+      return;
+    }
 
     const programContent = {
       name,
@@ -177,6 +208,7 @@ function ProgramEditor({ wsRef, isWsReady }) {
         },
       }),
     };
+
     let sanitizedContent;
     try {
       sanitizedContent = JSON.stringify(programContent);
@@ -240,9 +272,9 @@ function ProgramEditor({ wsRef, isWsReady }) {
         setStartDateEnabled(content.startDateEnabled !== false);
         setEndDate(content.endDate || '');
         setEndDateEnabled(content.endDateEnabled !== false);
-        setStartTime(content.startTime || '');
+        setStartTime(content.startTime || '00:00');
         setStartTimeEnabled(content.startTimeEnabled !== false);
-        setEndTime(content.endTime || '');
+        setEndTime(content.endTime || '23:59');
         setEndTimeEnabled(content.endTimeEnabled !== false);
         setSelectedDays(content.selectedDays || []);
         setDaysPerWeekEnabled(content.daysPerWeekEnabled !== false);
@@ -269,7 +301,6 @@ function ProgramEditor({ wsRef, isWsReady }) {
       setStatus('');
     };
     reader.readAsText(file);
-    // Reset file input
     event.target.value = '';
   };
 
@@ -327,7 +358,7 @@ function ProgramEditor({ wsRef, isWsReady }) {
       <div className="Title">
         <button className="save-button" onClick={handleImport}>
           Import
-        </button>   
+        </button>
         <button className="save-button" onClick={handleExport}>
           Export
         </button>
@@ -364,7 +395,7 @@ function ProgramEditor({ wsRef, isWsReady }) {
         />
       </div>
       <div className="form-group">
-        <label>Start Date Enabled:</label>
+        <label>Start Date and Time Enabled:</label>
         <label className="toggle-switch">
           <input
             type="checkbox"
@@ -376,18 +407,19 @@ function ProgramEditor({ wsRef, isWsReady }) {
       </div>
       {startDateEnabled && (
         <div className="form-group">
-          <label htmlFor="startDate">Start Date:</label>
+          <label htmlFor="startDate">Start Date and Time:</label>
           <input
             id="startDate"
-            type="date"
+            type="datetime-local"
             value={startDate}
             onChange={(e) => setStartDate(e.target.value)}
             className="input-field"
           />
+          <small className="form-text">When the program begins.</small>
         </div>
       )}
       <div className="form-group">
-        <label>Start Time Enabled:</label>
+        <label>Daily Start Time Enabled:</label>
         <label className="toggle-switch">
           <input
             type="checkbox"
@@ -399,7 +431,7 @@ function ProgramEditor({ wsRef, isWsReady }) {
       </div>
       {startTimeEnabled && (
         <div className="form-group">
-          <label htmlFor="startTime">Start Time:</label>
+          <label htmlFor="startTime">Daily Start Time:</label>
           <input
             id="startTime"
             type="time"
@@ -407,10 +439,11 @@ function ProgramEditor({ wsRef, isWsReady }) {
             onChange={(e) => setStartTime(e.target.value)}
             className="input-field"
           />
+          <small className="form-text">Time when the program starts each day.</small>
         </div>
       )}
       <div className="form-group">
-        <label>End Date Enabled:</label>
+        <label>End Date and Time Enabled:</label>
         <label className="toggle-switch">
           <input
             type="checkbox"
@@ -422,18 +455,19 @@ function ProgramEditor({ wsRef, isWsReady }) {
       </div>
       {endDateEnabled && (
         <div className="form-group">
-          <label htmlFor="endDate">End Date:</label>
+          <label htmlFor="endDate">End Date and Time:</label>
           <input
             id="endDate"
-            type="date"
+            type="datetime-local"
             value={endDate}
             onChange={(e) => setEndDate(e.target.value)}
             className="input-field"
           />
+          <small className="form-text">When the program ends.</small>
         </div>
       )}
       <div className="form-group">
-        <label>End Time Enabled:</label>
+        <label>Daily End Time Enabled:</label>
         <label className="toggle-switch">
           <input
             type="checkbox"
@@ -445,7 +479,7 @@ function ProgramEditor({ wsRef, isWsReady }) {
       </div>
       {endTimeEnabled && (
         <div className="form-group">
-          <label htmlFor="endTime">End Time:</label>
+          <label htmlFor="endTime">Daily End Time:</label>
           <input
             id="endTime"
             type="time"
@@ -453,6 +487,7 @@ function ProgramEditor({ wsRef, isWsReady }) {
             onChange={(e) => setEndTime(e.target.value)}
             className="input-field"
           />
+          <small className="form-text">Time when the program ends each day.</small>
         </div>
       )}
       <div className="form-group">
@@ -481,6 +516,9 @@ function ProgramEditor({ wsRef, isWsReady }) {
               </label>
             ))}
           </div>
+          <small className="form-text">
+            Select days when the program should run within the date range.
+          </small>
         </div>
       )}
       <div className="form-group">
