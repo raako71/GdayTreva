@@ -20,4 +20,5 @@ R0.17: Program bugs.
 R0.18: Export/Import.
 R0.19: CSS
 R0.20: Menu hover.
-R0.21: Add time to program start/stop, validate program
+R0.21: Add time to program start/stop, validate program.
+R0.22: Start High/Low for cycle timer.

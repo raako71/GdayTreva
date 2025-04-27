@@ -27,7 +27,6 @@ function ProgramEditor({ wsRef, isWsReady }) {
   const hasFetched = useRef(false);
   const fileInputRef = useRef(null);
 
-  // List of days for checkboxes
   const daysOfWeek = [
     'Monday',
     'Tuesday',
@@ -38,7 +37,6 @@ function ProgramEditor({ wsRef, isWsReady }) {
     'Sunday',
   ];
 
-  // Parse URL for programID on mount
   useEffect(() => {
     const params = new URLSearchParams(location.search);
     const id = params.get('programID');
@@ -54,7 +52,6 @@ function ProgramEditor({ wsRef, isWsReady }) {
     }
   }, [location]);
 
-  // Fetch program when WebSocket is ready and programID is set
   useEffect(() => {
     if (!isWsReady || !programID || programID === '00' || hasFetched.current) return;
 
@@ -63,7 +60,6 @@ function ProgramEditor({ wsRef, isWsReady }) {
     hasFetched.current = true;
   }, [isWsReady, programID, wsRef]);
 
-  // Handle WebSocket messages
   useEffect(() => {
     if (!wsRef.current) return;
 
@@ -97,6 +93,7 @@ function ProgramEditor({ wsRef, isWsReady }) {
               minutes: content.stopTime?.minutes?.toString() || '',
               hours: content.stopTime?.hours?.toString() || '',
             });
+            setStartHigh(content.startHigh !== false);  // Load startHigh, default true
             setStatus(`Loaded program ${data.programID}`);
             setError(null);
           } else {
@@ -126,7 +123,6 @@ function ProgramEditor({ wsRef, isWsReady }) {
     };
   }, [wsRef, isWsReady, programID, navigate]);
 
-  // Toggle day selection
   const toggleDay = (day) => {
     setSelectedDays((prev) =>
       prev.includes(day)
@@ -135,7 +131,6 @@ function ProgramEditor({ wsRef, isWsReady }) {
     );
   };
 
-  // Update runTime or stopTime fields
   const updateTimeField = (field, subfield, value) => {
     const setField = field === 'runTime' ? setRunTime : setStopTime;
     setField((prev) => ({
@@ -144,7 +139,6 @@ function ProgramEditor({ wsRef, isWsReady }) {
     }));
   };
 
-  // Validate program data
   const validateProgram = () => {
     if (startDateEnabled && endDateEnabled && startDate && endDate) {
       const start = new Date(startDate);
@@ -168,7 +162,6 @@ function ProgramEditor({ wsRef, isWsReady }) {
     return null;
   };
 
-  // Sanitize and save the program via WebSocket
   const saveProgram = async () => {
     setError(null);
     setStatus('Saving...');
@@ -206,6 +199,7 @@ function ProgramEditor({ wsRef, isWsReady }) {
           minutes: parseInt(stopTime.minutes) || 0,
           hours: parseInt(stopTime.hours) || 0,
         },
+        startHigh,  // Include startHigh for Cycle Timer
       }),
     };
 
@@ -239,19 +233,16 @@ function ProgramEditor({ wsRef, isWsReady }) {
     }
   };
 
-  // Handle Cancel button click
   const cancelEdit = () => {
     setError(null);
     setStatus('');
     navigate('/programs');
   };
 
-  // Handle Import button click
   const handleImport = () => {
     fileInputRef.current.click();
   };
 
-  // Handle file selection and import
   const handleFileSelect = (event) => {
     const file = event.target.files[0];
     if (!file) return;
@@ -289,6 +280,7 @@ function ProgramEditor({ wsRef, isWsReady }) {
           minutes: content.stopTime?.minutes?.toString() || '',
           hours: content.stopTime?.hours?.toString() || '',
         });
+        setStartHigh(content.startHigh !== false);  // Load startHigh, default true
         setStatus('Program imported successfully');
         setError(null);
       } catch (err) {
@@ -304,7 +296,6 @@ function ProgramEditor({ wsRef, isWsReady }) {
     event.target.value = '';
   };
 
-  // Handle Export button click
   const handleExport = () => {
     const programContent = {
       name,
@@ -332,6 +323,7 @@ function ProgramEditor({ wsRef, isWsReady }) {
           minutes: parseInt(stopTime.minutes) || 0,
           hours: parseInt(stopTime.hours) || 0,
         },
+        startHigh,  // Include startHigh for Cycle Timer
       }),
     };
 
@@ -626,6 +618,20 @@ function ProgramEditor({ wsRef, isWsReady }) {
                   <span>Seconds</span>
                 </div>
               </div>
+            </div>
+            <div className="form-group">
+              <label>Start High:</label>
+              <label className="toggle-switch">
+                <input
+                  type="checkbox"
+                  checked={startHigh}
+                  onChange={(e) => setStartHigh(e.target.checked)}
+                />
+                <span className="toggle-slider enabled-slider"></span>
+              </label>
+              <small className="form-text">
+                Start with output on (High) if checked, off (Low) if unchecked.
+              </small>
             </div>
           </div>
         ) : (
