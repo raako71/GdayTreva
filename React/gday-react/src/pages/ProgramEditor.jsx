@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import '../styles.css';
+import PropTypes from 'prop-types';
 
 function ProgramEditor({ wsRef, isWsReady }) {
   const [programID, setProgramID] = useState('00');
@@ -64,6 +65,7 @@ function ProgramEditor({ wsRef, isWsReady }) {
   useEffect(() => {
     if (!wsRef.current) return;
 
+    const socket = wsRef.current;
     const handleMessage = (event) => {
       try {
         const data = JSON.parse(event.data);
@@ -115,12 +117,13 @@ function ProgramEditor({ wsRef, isWsReady }) {
         }
       } catch (err) {
         setError('Error processing server response');
+        console.error(err);
       }
     };
 
-    wsRef.current.addEventListener('message', handleMessage);
+    socket.addEventListener('message', handleMessage);
     return () => {
-      wsRef.current.removeEventListener('message', handleMessage);
+      socket.removeEventListener('message', handleMessage);
     };
   }, [wsRef, isWsReady, programID, navigate]);
 
@@ -210,6 +213,7 @@ function ProgramEditor({ wsRef, isWsReady }) {
     } catch (err) {
       setError('Error serializing program data');
       setStatus('');
+      console.error(err);
       return;
     }
 
@@ -287,6 +291,7 @@ function ProgramEditor({ wsRef, isWsReady }) {
       } catch (err) {
         setError('Failed to parse JSON file');
         setStatus('');
+        console.error(err);
       }
     };
     reader.onerror = () => {
@@ -342,6 +347,7 @@ function ProgramEditor({ wsRef, isWsReady }) {
     } catch (err) {
       setError('Failed to export program');
       setStatus('');
+      console.error(err);
     }
   };
 
@@ -650,5 +656,12 @@ function ProgramEditor({ wsRef, isWsReady }) {
     </div>
   );
 }
+
+ProgramEditor.propTypes = {
+  wsRef: PropTypes.shape({
+    current: PropTypes.instanceOf(WebSocket),
+  }).isRequired,
+  isWsReady: PropTypes.bool.isRequired,
+};
 
 export default ProgramEditor;
