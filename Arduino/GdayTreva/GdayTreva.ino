@@ -8,12 +8,20 @@
 #include <ESPmDNS.h>
 #include <time.h>
 #include <sys/time.h>
+#include <ElegantOTA.h>
 
 #define FORMAT_LITTLEFS_IF_FAILED true
 
 // Pin definitions for outputs A and B
 #define OUTPUT_A_PIN 4
 #define OUTPUT_B_PIN 12
+
+// OTA Credentials
+const char* OTA_USERNAME = "admin";
+const char* OTA_PASSWORD = "admin";
+
+// OTA Progress Tracking
+static unsigned long otaProgressMillis = 0;
 
 struct Config {
   char ssid[32];
@@ -863,6 +871,8 @@ void setup() {
   });
   ws.onEvent(onWsEvent);
   server.addHandler(&ws);
+    // ElegantOTA Setup
+  ElegantOTA.begin(&server, OTA_USERNAME, OTA_PASSWORD);
   server.begin();
 }
 
@@ -909,5 +919,6 @@ void loop() {
     updateOutputs();
     lastOutputUpdate = millis();
   }
+    ElegantOTA.loop(); // Handle OTA tasks
   delay(10);
 }

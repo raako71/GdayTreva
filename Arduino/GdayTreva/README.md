@@ -25,3 +25,4 @@
  - 0.0.21: React Routing
  - 0.0.22: DNS issues. Kinda verbose wordarounds.
  - 0.1: Select and run program.
+ - 0.1.1: OTA.
