@@ -61,9 +61,11 @@ struct TriggerInfo {
   String trigger;
   uint32_t next_toggle; // 0 for Manual or non-Cycle
   String sensor_value;  // Empty for non-sensor triggers
+  bool state;           // Output state for A/B, false for Null
   bool operator==(const TriggerInfo& other) const {
     return id == other.id && output == other.output && trigger == other.trigger &&
-           next_toggle == other.next_toggle && sensor_value == other.sensor_value;
+           next_toggle == other.next_toggle && sensor_value == other.sensor_value &&
+           state == other.state;
   }
 };
 std::vector<TriggerInfo> last_trigger_info;
@@ -128,6 +130,9 @@ void sendTriggerStatus(const std::vector<TriggerInfo>& trigger_info) {
     prog["id"] = info.id;
     prog["output"] = info.output;
     prog["trigger"] = info.trigger;
+    if (info.output == "A" || info.output == "B") {
+      prog["state"] = info.state; // Add state for A/B outputs
+    }
     if (info.trigger == "Cycle" && info.next_toggle > 0) {
       prog["next_toggle"] = info.next_toggle;
     } else if (info.output == "Null" && info.trigger != "Manual" && !info.sensor_value.isEmpty()) {
@@ -224,7 +229,6 @@ void networkEvent(arduino_event_id_t event) {
   }
 }
 
-// Handles WebSocket events (connect, disconnect, data)
 void onWsEvent(AsyncWebSocket *server, AsyncWebSocketClient *client, AwsEventType type, void *arg, uint8_t *data, size_t len) {
   switch (type) {
     case WS_EVT_CONNECT:
@@ -237,8 +241,7 @@ void onWsEvent(AsyncWebSocket *server, AsyncWebSocketClient *client, AwsEventTyp
         serializeJson(doc, json);
         client->text(json);
       }
-      subscriber_epochs[client] = 0; // Auto-subscribe
-      sendOutputStatus(last_null_program_ids);
+      subscriber_epochs[client] = 0;
       sendTriggerStatus(last_trigger_info);
       break;
     case WS_EVT_DISCONNECT:
@@ -254,15 +257,12 @@ void onWsEvent(AsyncWebSocket *server, AsyncWebSocketClient *client, AwsEventTyp
           const char *command = doc["command"].as<const char*>();
           if (command && strcmp(command, "subscribe_output_status") == 0) {
             subscriber_epochs[client] = 0;
-            Serial.printf("Client #%u subscribed to output_status\n", client->id());
-            sendOutputStatus(last_null_program_ids);
+            Serial.printf("Client #%u subscribed to status\n", client->id());
             sendTriggerStatus(last_trigger_info);
           } else if (command && strcmp(command, "unsubscribe_output_status") == 0) {
             subscriber_epochs.erase(client);
-            Serial.printf("Client #%u unsubscribed from output_status\n", client->id());
-          } else if (command && strcmp(command, "get_output_status") == 0) {
-            sendOutputStatus(last_null_program_ids);
-          } else if (command && strcmp(command, "get_trigger_status") == 0) {
+            Serial.printf("Client #%u unsubscribed from status\n", client->id());
+          } else if (command && (strcmp(command, "get_output_status") == 0 || strcmp(command, "get_trigger_status") == 0)) {
             sendTriggerStatus(last_trigger_info);
           } else if (command && strcmp(command, "sync_time") == 0) {
             const char *timeStr = doc["time"].as<const char*>();
@@ -824,7 +824,6 @@ void updateOutputs() {
   int activeProgramA = -1;
   int activeProgramB = -1;
   std::vector<int> null_program_ids;
-  bool stateChanged = false;
   bool trigger_changed = false;
 
   // First pass: Determine active programs and Null programs
@@ -853,9 +852,9 @@ void updateOutputs() {
     }
   }
 
-  // Second pass: Create trigger_info for active A/B and Null programs
+  // Second pass: Create trigger_info
   std::vector<TriggerInfo> trigger_info;
-  auto addTriggerInfo = [&](int programId) {
+  auto addTriggerInfo = [&](int programId, bool state = false) {
     if (programId == -1) return;
     String filename = "/program" + String(programId < 10 ? "0" + String(programId) : String(programId)) + ".json";
     File file = LittleFS.open(filename, FILE_READ);
@@ -865,17 +864,17 @@ void updateOutputs() {
     StaticJsonDocument<4096> doc;
     if (deserializeJson(doc, content)) return;
     const char* output = doc["output"].as<const char*>() ?: "A";
-    TriggerInfo info = {programId, String(output), "", 0, ""};
+    TriggerInfo info = {programId, String(output), "", 0, "", state};
     info.trigger = doc["trigger"].as<const char*>() ?: "Manual";
     if (strcmp(output, "Null") == 0 && info.trigger != "Manual" && info.trigger != "Cycle") {
       info.sensor_value = "0";
     }
     trigger_info.push_back(info);
-    Serial.printf("Added TriggerInfo for program %d: output=%s, trigger=%s\n", programId, output, info.trigger.c_str());
+    Serial.printf("Added TriggerInfo for program %d: output=%s, trigger=%s, state=%d\n", programId, output, info.trigger.c_str(), info.state);
   };
 
-  addTriggerInfo(activeProgramA);
-  addTriggerInfo(activeProgramB);
+  addTriggerInfo(activeProgramA, outputAState);
+  addTriggerInfo(activeProgramB, outputBState);
   for (int id : null_program_ids) {
     addTriggerInfo(id);
   }
@@ -893,7 +892,6 @@ void updateOutputs() {
     uint32_t next_toggle = 0;
     if (cycleStateA.activeProgram != activeProgramA) {
       cycleStateA = {false, 0, false, activeProgramA};
-      stateChanged = true;
       trigger_changed = true;
     }
     if (strcmp(trigger, "Manual") == 0) {
@@ -903,20 +901,17 @@ void updateOutputs() {
     }
     if (currentStateA != outputAState) {
       Serial.printf("Active program for A: %d, State: %d\n", activeProgramA, outputAState);
-      stateChanged = true;
       trigger_changed = true;
     }
     for (auto& info : trigger_info) {
       if (info.id == activeProgramA) {
         info.next_toggle = next_toggle;
-        Serial.printf("Updated trigger_info for program %d: next_toggle=%u\n", info.id, next_toggle);
+        info.state = outputAState;
+        Serial.printf("Updated trigger_info for program %d: next_toggle=%u, state=%d\n", info.id, next_toggle, info.state);
       }
     }
   } else {
-    if (outputAState) {
-      stateChanged = true;
-      trigger_changed = true;
-    }
+    if (outputAState) trigger_changed = true;
     outputAState = false;
     cycleStateA = {false, 0, false, -1};
   }
@@ -935,7 +930,6 @@ void updateOutputs() {
     uint32_t next_toggle = 0;
     if (cycleStateB.activeProgram != activeProgramB) {
       cycleStateB = {false, 0, false, activeProgramB};
-      stateChanged = true;
       trigger_changed = true;
     }
     if (strcmp(trigger, "Manual") == 0) {
@@ -945,30 +939,22 @@ void updateOutputs() {
     }
     if (currentStateB != outputBState) {
       Serial.printf("Output B change, Program: %d, State: %d\n", activeProgramB, outputBState);
-      stateChanged = true;
       trigger_changed = true;
     }
     for (auto& info : trigger_info) {
       if (info.id == activeProgramB) {
         info.next_toggle = next_toggle;
-        Serial.printf("Updated trigger_info for program %d: next_toggle=%u\n", info.id, next_toggle);
+        info.state = outputBState;
+        Serial.printf("Updated trigger_info for program %d: next_toggle=%u, state=%d\n", info.id, next_toggle, info.state);
       }
     }
   } else {
-    if (outputBState) {
-      stateChanged = true;
-      trigger_changed = true;
-    }
+    if (outputBState) trigger_changed = true;
     outputBState = false;
     cycleStateB = {false, 0, false, -1};
   }
   digitalWrite(OUTPUT_B_PIN, outputBState ? HIGH : LOW);
 
-  if (stateChanged || null_program_ids != last_null_program_ids) {
-    Serial.println("Output status changed, sending output_status");
-    sendOutputStatus(null_program_ids);
-    last_null_program_ids = null_program_ids;
-  }
   if (trigger_changed || trigger_info != last_trigger_info) {
     Serial.println("Trigger status changed, sending trigger_status");
     sendTriggerStatus(trigger_info);

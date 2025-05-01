@@ -28,3 +28,4 @@
  - 0.1.1: OTA.
  - 0.1.2: Push program state to react.
  - 0.1.2.1: TriggerInfo refined.
+ - 0.1.2.2: TriggerInfo refined.
