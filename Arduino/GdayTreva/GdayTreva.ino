@@ -824,9 +824,10 @@ void updateOutputs() {
   int activeProgramA = -1;
   int activeProgramB = -1;
   std::vector<int> null_program_ids;
-  std::vector<TriggerInfo> trigger_info;
   bool stateChanged = false;
+  bool trigger_changed = false;
 
+  // First pass: Determine active programs and Null programs
   for (int i = 1; i <= numPrograms; i++) {
     String idStr = String(i);
     if (i < 10) idStr = "0" + idStr;
@@ -843,20 +844,40 @@ void updateOutputs() {
     if (!isProgramActive(doc, i)) continue;
 
     const char* output = doc["output"].as<const char*>() ?: "A";
-    TriggerInfo info = {i, String(output), "", 0, ""};
-    info.trigger = doc["trigger"].as<const char*>() ?: "Manual";
-
     if (strcmp(output, "A") == 0) {
       if (activeProgramA == -1 || i < activeProgramA) activeProgramA = i;
     } else if (strcmp(output, "B") == 0) {
       if (activeProgramB == -1 || i < activeProgramB) activeProgramB = i;
     } else if (strcmp(output, "Null") == 0) {
       null_program_ids.push_back(i);
-      if (info.trigger != "Manual" && info.trigger != "Cycle") {
-        info.sensor_value = "0"; // Placeholder for future sensor data
-      }
+    }
+  }
+
+  // Second pass: Create trigger_info for active A/B and Null programs
+  std::vector<TriggerInfo> trigger_info;
+  auto addTriggerInfo = [&](int programId) {
+    if (programId == -1) return;
+    String filename = "/program" + String(programId < 10 ? "0" + String(programId) : String(programId)) + ".json";
+    File file = LittleFS.open(filename, FILE_READ);
+    if (!file) return;
+    String content = file.readString();
+    file.close();
+    StaticJsonDocument<4096> doc;
+    if (deserializeJson(doc, content)) return;
+    const char* output = doc["output"].as<const char*>() ?: "A";
+    TriggerInfo info = {programId, String(output), "", 0, ""};
+    info.trigger = doc["trigger"].as<const char*>() ?: "Manual";
+    if (strcmp(output, "Null") == 0 && info.trigger != "Manual" && info.trigger != "Cycle") {
+      info.sensor_value = "0";
     }
     trigger_info.push_back(info);
+    Serial.printf("Added TriggerInfo for program %d: output=%s, trigger=%s\n", programId, output, info.trigger.c_str());
+  };
+
+  addTriggerInfo(activeProgramA);
+  addTriggerInfo(activeProgramB);
+  for (int id : null_program_ids) {
+    addTriggerInfo(id);
   }
 
   // Output A
@@ -873,6 +894,7 @@ void updateOutputs() {
     if (cycleStateA.activeProgram != activeProgramA) {
       cycleStateA = {false, 0, false, activeProgramA};
       stateChanged = true;
+      trigger_changed = true;
     }
     if (strcmp(trigger, "Manual") == 0) {
       outputAState = true;
@@ -882,12 +904,19 @@ void updateOutputs() {
     if (currentStateA != outputAState) {
       Serial.printf("Active program for A: %d, State: %d\n", activeProgramA, outputAState);
       stateChanged = true;
+      trigger_changed = true;
     }
     for (auto& info : trigger_info) {
-      if (info.id == activeProgramA) info.next_toggle = next_toggle;
+      if (info.id == activeProgramA) {
+        info.next_toggle = next_toggle;
+        Serial.printf("Updated trigger_info for program %d: next_toggle=%u\n", info.id, next_toggle);
+      }
     }
   } else {
-    if (outputAState) stateChanged = true;
+    if (outputAState) {
+      stateChanged = true;
+      trigger_changed = true;
+    }
     outputAState = false;
     cycleStateA = {false, 0, false, -1};
   }
@@ -907,6 +936,7 @@ void updateOutputs() {
     if (cycleStateB.activeProgram != activeProgramB) {
       cycleStateB = {false, 0, false, activeProgramB};
       stateChanged = true;
+      trigger_changed = true;
     }
     if (strcmp(trigger, "Manual") == 0) {
       outputBState = true;
@@ -916,22 +946,31 @@ void updateOutputs() {
     if (currentStateB != outputBState) {
       Serial.printf("Output B change, Program: %d, State: %d\n", activeProgramB, outputBState);
       stateChanged = true;
+      trigger_changed = true;
     }
     for (auto& info : trigger_info) {
-      if (info.id == activeProgramB) info.next_toggle = next_toggle;
+      if (info.id == activeProgramB) {
+        info.next_toggle = next_toggle;
+        Serial.printf("Updated trigger_info for program %d: next_toggle=%u\n", info.id, next_toggle);
+      }
     }
   } else {
-    if (outputBState) stateChanged = true;
+    if (outputBState) {
+      stateChanged = true;
+      trigger_changed = true;
+    }
     outputBState = false;
     cycleStateB = {false, 0, false, -1};
   }
   digitalWrite(OUTPUT_B_PIN, outputBState ? HIGH : LOW);
 
   if (stateChanged || null_program_ids != last_null_program_ids) {
+    Serial.println("Output status changed, sending output_status");
     sendOutputStatus(null_program_ids);
     last_null_program_ids = null_program_ids;
   }
-  if (trigger_info != last_trigger_info) {
+  if (trigger_changed || trigger_info != last_trigger_info) {
+    Serial.println("Trigger status changed, sending trigger_status");
     sendTriggerStatus(trigger_info);
     last_trigger_info = trigger_info;
   }

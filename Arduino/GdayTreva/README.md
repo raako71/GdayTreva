@@ -27,3 +27,6 @@
  - 0.1: Select and run program.
  - 0.1.1: OTA.
  - 0.1.2: Push program state to react.
+ - 0.1.2.1: TriggerInfo refined
+* Fixes the issue of sending TriggerInfo for non-active, enabled programs by limiting trigger_info to activeProgramA, activeProgramB, and null_program_ids.
+* Ensures trigger_status is sent only on changes, with trigger_changed covering cases missed by trigger_info != last_trigger_info.
