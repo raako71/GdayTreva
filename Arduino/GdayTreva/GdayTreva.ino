@@ -133,7 +133,7 @@ void sendTriggerStatus(const std::vector<TriggerInfo>& trigger_info) {
     if (info.output == "A" || info.output == "B") {
       prog["state"] = info.state; // Add state for A/B outputs
     }
-    if (info.trigger == "Cycle" && info.next_toggle > 0) {
+    if ((info.trigger == "Cycle Timer") && info.next_toggle > 0) {
       prog["next_toggle"] = info.next_toggle;
     } else if (info.output == "Null" && info.trigger != "Manual" && !info.sensor_value.isEmpty()) {
       prog["value"] = info.sensor_value;
@@ -866,7 +866,7 @@ void updateOutputs() {
     const char* output = doc["output"].as<const char*>() ?: "A";
     TriggerInfo info = {programId, String(output), "", 0, "", state};
     info.trigger = doc["trigger"].as<const char*>() ?: "Manual";
-    if (strcmp(output, "Null") == 0 && info.trigger != "Manual" && info.trigger != "Cycle") {
+    if (strcmp(output, "Null") == 0 && info.trigger != "Manual" && info.trigger != "Cycle Timer") {
       info.sensor_value = "0";
     }
     trigger_info.push_back(info);
@@ -896,7 +896,7 @@ void updateOutputs() {
     }
     if (strcmp(trigger, "Manual") == 0) {
       outputAState = true;
-    } else if (strcmp(trigger, "Cycle") == 0) {
+    } else if (strcmp(trigger, "Cycle Timer") == 0) {
       outputAState = runCycleTimer(doc, cycleStateA, "Output A", next_toggle);
     }
     if (currentStateA != outputAState) {
@@ -934,7 +934,7 @@ void updateOutputs() {
     }
     if (strcmp(trigger, "Manual") == 0) {
       outputBState = true;
-    } else if (strcmp(trigger, "Cycle") == 0) {
+    } else if (strcmp(trigger, "Cycle Timer") == 0) {
       outputBState = runCycleTimer(doc, cycleStateB, "Output B", next_toggle);
     }
     if (currentStateB != outputBState) {

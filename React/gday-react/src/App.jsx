@@ -16,9 +16,8 @@ function App() {
   const [isWsReady, setIsWsReady] = useState(false);
   const wsRef = useRef(null);
   const [wsServer, setWsServer] = useState(null);
-  const [outputStatus, setOutputStatus] = useState(null);
   const [triggerStatus, setTriggerStatus] = useState(null);
-  const [programs, setPrograms] = useState([]); // New state for programs
+  const [programs, setPrograms] = useState([]);
 
   const requestNetworkInfo = useCallback(() => {
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
@@ -86,7 +85,7 @@ function App() {
           setLastError(null);
           setIsWsReady(true);
           retryDelay = 1000;
-          requestPrograms(); // Request programs on connection
+          requestPrograms();
         }
       };
 
@@ -126,10 +125,6 @@ function App() {
                 break;
               case 'time_offset':
                 setMessage((prev) => ({ ...prev, offset_minutes: data.offset_minutes }));
-                break;
-              case 'output_status':
-                console.log('Received output_status:', data);
-                setOutputStatus(data);
                 break;
               case 'trigger_status':
                 console.log('Received trigger_status:', data);
@@ -180,10 +175,10 @@ function App() {
     <div className="App">
       <TimeBar message={message} wsRef={wsRef} />
       <Routes>
-        <Route path="/" element={<Home wsRef={wsRef} isWsReady={isWsReady} outputStatus={outputStatus} triggerStatus={triggerStatus} programs={programs} />} />
+        <Route path="/" element={<Home message={message} wsRef={wsRef} isWsReady={isWsReady} triggerStatus={triggerStatus} programs={programs} />} />
         <Route path="/graph" element={<Graph />} />
         <Route path="/settings" element={<Settings requestNetworkInfo={requestNetworkInfo} networkInfo={networkInfo} connectionStatus={connectionStatus} />} />
-        <Route path="/programs" element={<Programs wsRef={wsRef} isWsReady={isWsReady} outputStatus={outputStatus} triggerStatus={triggerStatus} programs={programs} />} />
+        <Route path="/programs" element={<Programs wsRef={wsRef} isWsReady={isWsReady} triggerStatus={triggerStatus} programs={programs} />} />
         <Route path="/programEditor" element={<ProgramEditor wsRef={wsRef} isWsReady={isWsReady} />} />
       </Routes>
     </div>
