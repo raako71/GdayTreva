@@ -16,14 +16,26 @@ function App() {
   const [isWsReady, setIsWsReady] = useState(false);
   const wsRef = useRef(null);
   const [wsServer, setWsServer] = useState(null);
-  const [outputStatus, setOutputStatus] = useState(null); // New state for output_status
-  const [triggerStatus, setTriggerStatus] = useState(null); // New state for trigger_status
+  const [outputStatus, setOutputStatus] = useState(null);
+  const [triggerStatus, setTriggerStatus] = useState(null);
+  const [programs, setPrograms] = useState([]); // New state for programs
 
   const requestNetworkInfo = useCallback(() => {
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
       wsRef.current.send(JSON.stringify({ command: 'get_network_info' }));
     } else {
       console.warn('WebSocket not connected, cannot request network info');
+    }
+  }, []);
+
+  const requestPrograms = useCallback(() => {
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      for (let i = 1; i <= 10; i++) {
+        const id = i.toString().padStart(2, '0');
+        wsRef.current.send(JSON.stringify({ command: 'get_program', programID: id }));
+      }
+    } else {
+      console.warn('WebSocket not connected, cannot request programs');
     }
   }, []);
 
@@ -74,6 +86,7 @@ function App() {
           setLastError(null);
           setIsWsReady(true);
           retryDelay = 1000;
+          requestPrograms(); // Request programs on connection
         }
       };
 
@@ -96,6 +109,20 @@ function App() {
                 console.log('Save program response:', data);
                 break;
               case 'get_program_response':
+                if (data.success && data.content) {
+                  const content = JSON.parse(data.content);
+                  setPrograms((prev) => {
+                    if (prev.some((p) => p.id === data.programID)) {
+                      return prev.map((p) =>
+                        p.id === data.programID ? { ...p, ...content, id: data.programID } : p
+                      );
+                    }
+                    return [
+                      ...prev,
+                      { id: data.programID, ...content },
+                    ];
+                  });
+                }
                 break;
               case 'time_offset':
                 setMessage((prev) => ({ ...prev, offset_minutes: data.offset_minutes }));
@@ -147,16 +174,16 @@ function App() {
       clearTimeout(reconnectTimeout);
       if (wsRef.current) wsRef.current.close();
     };
-  }, [wsServer]);
+  }, [wsServer, requestPrograms]);
 
   return (
     <div className="App">
       <TimeBar message={message} wsRef={wsRef} />
       <Routes>
-        <Route path="/" element={<Home wsRef={wsRef} isWsReady={isWsReady} outputStatus={outputStatus} triggerStatus={triggerStatus} />} />
+        <Route path="/" element={<Home wsRef={wsRef} isWsReady={isWsReady} outputStatus={outputStatus} triggerStatus={triggerStatus} programs={programs} />} />
         <Route path="/graph" element={<Graph />} />
         <Route path="/settings" element={<Settings requestNetworkInfo={requestNetworkInfo} networkInfo={networkInfo} connectionStatus={connectionStatus} />} />
-        <Route path="/programs" element={<Programs wsRef={wsRef} isWsReady={isWsReady} outputStatus={outputStatus} triggerStatus={triggerStatus} />} />
+        <Route path="/programs" element={<Programs wsRef={wsRef} isWsReady={isWsReady} outputStatus={outputStatus} triggerStatus={triggerStatus} programs={programs} />} />
         <Route path="/programEditor" element={<ProgramEditor wsRef={wsRef} isWsReady={isWsReady} />} />
       </Routes>
     </div>

@@ -1,52 +1,8 @@
-import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import PropTypes from 'prop-types';
 import '../styles.css';
 
-function Programs({ wsRef, isWsReady }) {
-  const [programs, setPrograms] = useState([]);
-
-  useEffect(() => {
-    if (!isWsReady || !wsRef.current) return;
-
-    for (let i = 1; i <= 10; i++) {
-      const id = i.toString().padStart(2, '0');
-      wsRef.current.send(JSON.stringify({ command: 'get_program', programID: id }));
-    }
-
-    const handleMessage = (event) => {
-      try {
-        const data = JSON.parse(event.data);
-        if (data.type === 'get_program_response' && data.success && data.content) {
-          const content = JSON.parse(data.content);
-          setPrograms((prev) => {
-            if (prev.some((p) => p.id === data.programID)) return prev;
-            return [
-              ...prev,
-              {
-                id: data.programID,
-                name: 'name' in content ? content.name : null,
-              },
-            ];
-          });
-        }
-      } catch (err) {
-        console.error('Programs: Failed to parse WebSocket message:', err);
-      }
-    };
-
-    wsRef.current.addEventListener('message', handleMessage);
-
-    // Capture wsRef.current for cleanup
-    const currentWs = wsRef.current;
-
-    return () => {
-      if (currentWs) {
-        currentWs.removeEventListener('message', handleMessage);
-      }
-    };
-  }, [isWsReady, wsRef]);
-
+function Programs({ programs }) {
   return (
     <div>
       <div className="Title">
@@ -89,10 +45,12 @@ function Programs({ wsRef, isWsReady }) {
 }
 
 Programs.propTypes = {
-  isWsReady: PropTypes.bool.isRequired,
-  wsRef: PropTypes.shape({
-    current: PropTypes.instanceOf(WebSocket),
-  }).isRequired,
+  programs: PropTypes.arrayOf(
+    PropTypes.shape({
+      id: PropTypes.string.isRequired,
+      name: PropTypes.string,
+    })
+  ).isRequired,
 };
 
 export default Programs;
