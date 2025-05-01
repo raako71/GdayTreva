@@ -26,3 +26,4 @@
  - 0.0.22: DNS issues. Kinda verbose wordarounds.
  - 0.1: Select and run program.
  - 0.1.1: OTA.
+ - 0.1.2: Push program state to react.

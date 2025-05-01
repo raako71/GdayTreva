@@ -16,6 +16,8 @@ function App() {
   const [isWsReady, setIsWsReady] = useState(false);
   const wsRef = useRef(null);
   const [wsServer, setWsServer] = useState(null);
+  const [outputStatus, setOutputStatus] = useState(null); // New state for output_status
+  const [triggerStatus, setTriggerStatus] = useState(null); // New state for trigger_status
 
   const requestNetworkInfo = useCallback(() => {
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
@@ -79,7 +81,6 @@ function App() {
         if (isMounted) {
           try {
             const data = JSON.parse(event.data);
-            //console.log('Received WebSocket message:', data); // Debug log
             if (!data.type) {
               console.warn('Message missing type:', data);
               return;
@@ -87,7 +88,6 @@ function App() {
             switch (data.type) {
               case 'time':
                 setMessage(data);
-                //console.log('Updated message with time:', data);
                 break;
               case 'network_info':
                 setNetworkInfo(data);
@@ -96,11 +96,17 @@ function App() {
                 console.log('Save program response:', data);
                 break;
               case 'get_program_response':
-                // console.log('Get program response:', data);
                 break;
               case 'time_offset':
                 setMessage((prev) => ({ ...prev, offset_minutes: data.offset_minutes }));
-                //console.log('Received time_offset:', data.offset_minutes);
+                break;
+              case 'output_status':
+                console.log('Received output_status:', data);
+                setOutputStatus(data);
+                break;
+              case 'trigger_status':
+                console.log('Received trigger_status:', data);
+                setTriggerStatus(data);
                 break;
               default:
                 console.warn('Unknown message type:', data.type);
@@ -147,10 +153,10 @@ function App() {
     <div className="App">
       <TimeBar message={message} wsRef={wsRef} />
       <Routes>
-        <Route path="/" element={<Home />} />
+        <Route path="/" element={<Home wsRef={wsRef} isWsReady={isWsReady} outputStatus={outputStatus} triggerStatus={triggerStatus} />} />
         <Route path="/graph" element={<Graph />} />
         <Route path="/settings" element={<Settings requestNetworkInfo={requestNetworkInfo} networkInfo={networkInfo} connectionStatus={connectionStatus} />} />
-        <Route path="/programs" element={<Programs wsRef={wsRef} isWsReady={isWsReady} />} />
+        <Route path="/programs" element={<Programs wsRef={wsRef} isWsReady={isWsReady} outputStatus={outputStatus} triggerStatus={triggerStatus} />} />
         <Route path="/programEditor" element={<ProgramEditor wsRef={wsRef} isWsReady={isWsReady} />} />
       </Routes>
     </div>

@@ -9,6 +9,8 @@
 #include <time.h>
 #include <sys/time.h>
 #include <ElegantOTA.h>
+#include <map>    // For subscriber_epochs
+#include <vector> // For null_program_ids and trigger_info
 
 #define FORMAT_LITTLEFS_IF_FAILED true
 
@@ -47,6 +49,25 @@ const unsigned long ONE_DAY_MS = 24 * 60 * 60 * 1000UL;
 unsigned long totalHeap = 0;
 int numPrograms = 10;
 
+// Subscriber map and status tracking
+std::map<AsyncWebSocketClient*, uint32_t> subscriber_epochs;
+uint32_t last_output_epoch = 0;
+std::vector<int> last_null_program_ids;
+
+// Trigger info struct
+struct TriggerInfo {
+  int id;
+  String output;
+  String trigger;
+  uint32_t next_toggle; // 0 for Manual or non-Cycle
+  String sensor_value;  // Empty for non-sensor triggers
+  bool operator==(const TriggerInfo& other) const {
+    return id == other.id && output == other.output && trigger == other.trigger &&
+           next_toggle == other.next_toggle && sensor_value == other.sensor_value;
+  }
+};
+std::vector<TriggerInfo> last_trigger_info;
+
 // Output states
 bool outputAState = false;
 bool outputBState = false;
@@ -60,6 +81,71 @@ struct CycleState {
 };
 CycleState cycleStateA = {false, 0, false, -1};
 CycleState cycleStateB = {false, 0, false, -1};
+
+// Sends output status to subscribed clients
+void sendOutputStatus(const std::vector<int>& null_program_ids) {
+  if (subscriber_epochs.empty()) return;
+
+  uint32_t new_epoch = millis();
+  StaticJsonDocument<512> doc;
+  doc["type"] = "output_status";
+  doc["epoch"] = new_epoch;
+  doc["prog_a"] = cycleStateA.activeProgram;
+  doc["prog_b"] = cycleStateB.activeProgram;
+  doc["out_a"] = outputAState;
+  doc["out_b"] = outputBState;
+
+  JsonArray null_ids = doc.createNestedArray("null_progs");
+  for (int id : null_program_ids) {
+    null_ids.add(id);
+  }
+
+  String json;
+  serializeJson(doc, json);
+
+  for (auto& pair : subscriber_epochs) {
+    if (new_epoch > pair.second) {
+      pair.first->text(json);
+      pair.second = new_epoch;
+      Serial.printf("Sent output_status to client #%u\n", pair.first->id());
+    }
+  }
+  last_output_epoch = new_epoch;
+}
+
+// Sends trigger status to subscribed clients
+void sendTriggerStatus(const std::vector<TriggerInfo>& trigger_info) {
+  if (subscriber_epochs.empty()) return;
+
+  uint32_t new_epoch = millis();
+  StaticJsonDocument<512> doc;
+  doc["type"] = "trigger_status";
+  doc["epoch"] = new_epoch;
+
+  JsonArray progs = doc.createNestedArray("progs");
+  for (const auto& info : trigger_info) {
+    JsonObject prog = progs.createNestedObject();
+    prog["id"] = info.id;
+    prog["output"] = info.output;
+    prog["trigger"] = info.trigger;
+    if (info.trigger == "Cycle" && info.next_toggle > 0) {
+      prog["next_toggle"] = info.next_toggle;
+    } else if (info.output == "Null" && info.trigger != "Manual" && !info.sensor_value.isEmpty()) {
+      prog["value"] = info.sensor_value;
+    }
+  }
+
+  String json;
+  serializeJson(doc, json);
+
+  for (auto& pair : subscriber_epochs) {
+    if (new_epoch > pair.second) {
+      pair.first->text(json);
+      pair.second = new_epoch;
+      Serial.printf("Sent trigger_status to client #%u\n", pair.first->id());
+    }
+  }
+}
 
 // Handles network events (Ethernet/WiFi connect/disconnect)
 void networkEvent(arduino_event_id_t event) {
@@ -151,9 +237,13 @@ void onWsEvent(AsyncWebSocket *server, AsyncWebSocketClient *client, AwsEventTyp
         serializeJson(doc, json);
         client->text(json);
       }
+      subscriber_epochs[client] = 0; // Auto-subscribe
+      sendOutputStatus(last_null_program_ids);
+      sendTriggerStatus(last_trigger_info);
       break;
     case WS_EVT_DISCONNECT:
       Serial.printf("WebSocket client #%u disconnected\n", client->id());
+      subscriber_epochs.erase(client);
       break;
     case WS_EVT_DATA:
       {
@@ -162,7 +252,19 @@ void onWsEvent(AsyncWebSocket *server, AsyncWebSocketClient *client, AwsEventTyp
         DeserializationError error = deserializeJson(doc, (char *)data, len);
         if (!error) {
           const char *command = doc["command"].as<const char*>();
-          if (command && strcmp(command, "sync_time") == 0) {
+          if (command && strcmp(command, "subscribe_output_status") == 0) {
+            subscriber_epochs[client] = 0;
+            Serial.printf("Client #%u subscribed to output_status\n", client->id());
+            sendOutputStatus(last_null_program_ids);
+            sendTriggerStatus(last_trigger_info);
+          } else if (command && strcmp(command, "unsubscribe_output_status") == 0) {
+            subscriber_epochs.erase(client);
+            Serial.printf("Client #%u unsubscribed from output_status\n", client->id());
+          } else if (command && strcmp(command, "get_output_status") == 0) {
+            sendOutputStatus(last_null_program_ids);
+          } else if (command && strcmp(command, "get_trigger_status") == 0) {
+            sendTriggerStatus(last_trigger_info);
+          } else if (command && strcmp(command, "sync_time") == 0) {
             const char *timeStr = doc["time"].as<const char*>();
             if (timeStr) {
               setTimeFromClient(timeStr);
@@ -337,6 +439,7 @@ void handleSaveProgram(AsyncWebSocketClient *client, const JsonDocument &doc) {
 
   file.close();
   sendProgramResponse(client, true, "Program saved successfully", targetID.c_str());
+  updateOutputs(); // Trigger status updates
 }
 
 // Sends current time and memory usage to all WebSocket clients
@@ -675,22 +778,23 @@ bool isProgramActive(const JsonDocument& doc, int progNum) {
 }
 
 // Implements Cycle Timer trigger with startHigh option
-bool runCycleTimer(const JsonDocument& doc, CycleState& state, const char* output) {
+bool runCycleTimer(const JsonDocument& doc, CycleState& state, const char* output, uint32_t& next_toggle) {
   JsonObjectConst runTime = doc["runTime"];
   JsonObjectConst stopTime = doc["stopTime"];
   if (runTime.isNull() || stopTime.isNull()) return false;
 
   int runSeconds = (runTime["hours"].as<int>() * 3600) + (runTime["minutes"].as<int>() * 60) + (runTime["seconds"].as<int>());
   int stopSeconds = (stopTime["hours"].as<int>() * 3600) + (stopTime["minutes"].as<int>() * 60) + (stopTime["seconds"].as<int>());
-  bool startHigh = doc["startHigh"].as<bool>();  // Default handled in frontend (true)
-  if (runSeconds == 0 || stopSeconds == 0) return false;  // Avoid infinite loops
+  bool startHigh = doc["startHigh"].as<bool>();
+  if (runSeconds == 0 || stopSeconds == 0) return false;
 
   unsigned long now = millis();
   if (!state.isRunning) {
     state.isRunning = true;
     state.lastSwitchTime = now;
     state.isOnPhase = startHigh;
-    Serial.printf("Cycle Timer started for %s, startHigh: %d\n", output, startHigh);
+    next_toggle = now + (startHigh ? runSeconds : stopSeconds) * 1000;
+    Serial.printf("Cycle Timer started for %s, next_toggle: %u\n", output, next_toggle);
     return state.isOnPhase;
   }
 
@@ -698,26 +802,31 @@ bool runCycleTimer(const JsonDocument& doc, CycleState& state, const char* outpu
   if (state.isOnPhase && elapsed >= (unsigned long)runSeconds * 1000) {
     state.isOnPhase = false;
     state.lastSwitchTime = now;
-    Serial.printf("Cycle Timer for %s switched to off\n", output);
+    next_toggle = now + stopSeconds * 1000;
+    Serial.printf("Cycle Timer for %s switched to off, next_toggle: %u\n", output, next_toggle);
     return false;
   } else if (!state.isOnPhase && elapsed >= (unsigned long)stopSeconds * 1000) {
     state.isOnPhase = true;
     state.lastSwitchTime = now;
-    Serial.printf("Cycle Timer for %s switched to on\n", output);
+    next_toggle = now + runSeconds * 1000;
+    Serial.printf("Cycle Timer for %s switched to on, next_toggle: %u\n", output, next_toggle);
     return true;
   }
+  next_toggle = state.lastSwitchTime + ((state.isOnPhase ? runSeconds : stopSeconds) * 1000 - elapsed);
   return state.isOnPhase;
 }
 
 // Determines active programs and sets outputs A and B
 void updateOutputs() {
   time_t now = getAdjustedTime();
-  if (now < 946684800) return;  // Ensure time is synced
+  if (now < 946684800) return;
 
-  int activeProgramA = -1;  // Lowest active program ID for output A
-  int activeProgramB = -1;  // Lowest active program ID for output B
+  int activeProgramA = -1;
+  int activeProgramB = -1;
+  std::vector<int> null_program_ids;
+  std::vector<TriggerInfo> trigger_info;
+  bool stateChanged = false;
 
-  // Check all programs (01 to 10)
   for (int i = 1; i <= numPrograms; i++) {
     String idStr = String(i);
     if (i < 10) idStr = "0" + idStr;
@@ -726,33 +835,33 @@ void updateOutputs() {
 
     File file = LittleFS.open(filename, FILE_READ);
     if (!file) continue;
-
     String content = file.readString();
     file.close();
 
     StaticJsonDocument<4096> doc;
-    DeserializationError error = deserializeJson(doc, content);
-    if (error) continue;
-
-    if (!isProgramActive(doc, i)) {
-      continue;
-    }
+    if (deserializeJson(doc, content)) continue;
+    if (!isProgramActive(doc, i)) continue;
 
     const char* output = doc["output"].as<const char*>() ?: "A";
+    TriggerInfo info = {i, String(output), "", 0, ""};
+    info.trigger = doc["trigger"].as<const char*>() ?: "Manual";
+
     if (strcmp(output, "A") == 0) {
-      if (activeProgramA == -1 || i < activeProgramA) {
-        activeProgramA = i;
-      }
+      if (activeProgramA == -1 || i < activeProgramA) activeProgramA = i;
     } else if (strcmp(output, "B") == 0) {
-      if (activeProgramB == -1 || i < activeProgramB) {
-        activeProgramB = i;
+      if (activeProgramB == -1 || i < activeProgramB) activeProgramB = i;
+    } else if (strcmp(output, "Null") == 0) {
+      null_program_ids.push_back(i);
+      if (info.trigger != "Manual" && info.trigger != "Cycle") {
+        info.sensor_value = "0"; // Placeholder for future sensor data
       }
     }
+    trigger_info.push_back(info);
   }
 
-  // Set output A
+  // Output A
   if (activeProgramA != -1) {
-    int currentStateA = outputAState;
+    bool currentStateA = outputAState;
     String filename = "/program" + String(activeProgramA < 10 ? "0" + String(activeProgramA) : String(activeProgramA)) + ".json";
     File file = LittleFS.open(filename, FILE_READ);
     String content = file.readString();
@@ -760,26 +869,33 @@ void updateOutputs() {
     StaticJsonDocument<4096> doc;
     deserializeJson(doc, content);
     const char* trigger = doc["trigger"].as<const char*>() ?: "Manual";
-    // Reset Cycle Timer if the active program has changed
+    uint32_t next_toggle = 0;
     if (cycleStateA.activeProgram != activeProgramA) {
       cycleStateA = {false, 0, false, activeProgramA};
-      Serial.printf("Output A: New active program %d, resetting Cycle Timer\n", activeProgramA);
+      stateChanged = true;
     }
     if (strcmp(trigger, "Manual") == 0) {
       outputAState = true;
-    } else if (strcmp(trigger, "Cycle Timer") == 0) {
-      outputAState = runCycleTimer(doc, cycleStateA, "Output A");
+    } else if (strcmp(trigger, "Cycle") == 0) {
+      outputAState = runCycleTimer(doc, cycleStateA, "Output A", next_toggle);
     }
-    if(currentStateA != outputAState) Serial.printf("Active program for A: %d, State: %d\n", activeProgramA, outputAState);
+    if (currentStateA != outputAState) {
+      Serial.printf("Active program for A: %d, State: %d\n", activeProgramA, outputAState);
+      stateChanged = true;
+    }
+    for (auto& info : trigger_info) {
+      if (info.id == activeProgramA) info.next_toggle = next_toggle;
+    }
   } else {
+    if (outputAState) stateChanged = true;
     outputAState = false;
-    cycleStateA = {false, 0, false, -1};  // Reset Cycle Timer
+    cycleStateA = {false, 0, false, -1};
   }
   digitalWrite(OUTPUT_A_PIN, outputAState ? HIGH : LOW);
 
-  // Set output B
+  // Output B
   if (activeProgramB != -1) {
-    int currentStateB = outputBState;
+    bool currentStateB = outputBState;
     String filename = "/program" + String(activeProgramB < 10 ? "0" + String(activeProgramB) : String(activeProgramB)) + ".json";
     File file = LittleFS.open(filename, FILE_READ);
     String content = file.readString();
@@ -787,22 +903,38 @@ void updateOutputs() {
     StaticJsonDocument<4096> doc;
     deserializeJson(doc, content);
     const char* trigger = doc["trigger"].as<const char*>() ?: "Manual";
-    // Reset Cycle Timer if the active program has changed
+    uint32_t next_toggle = 0;
     if (cycleStateB.activeProgram != activeProgramB) {
       cycleStateB = {false, 0, false, activeProgramB};
-      Serial.printf("Output B: New active program %d, resetting Cycle Timer\n", activeProgramB);
+      stateChanged = true;
     }
     if (strcmp(trigger, "Manual") == 0) {
       outputBState = true;
-    } else if (strcmp(trigger, "Cycle Timer") == 0) {
-      outputBState = runCycleTimer(doc, cycleStateB, "Output B");
+    } else if (strcmp(trigger, "Cycle") == 0) {
+      outputBState = runCycleTimer(doc, cycleStateB, "Output B", next_toggle);
     }
-    if(currentStateB != outputBState) Serial.printf("Output B change, Program: %d, State: %d\n", activeProgramB, outputBState);
+    if (currentStateB != outputBState) {
+      Serial.printf("Output B change, Program: %d, State: %d\n", activeProgramB, outputBState);
+      stateChanged = true;
+    }
+    for (auto& info : trigger_info) {
+      if (info.id == activeProgramB) info.next_toggle = next_toggle;
+    }
   } else {
+    if (outputBState) stateChanged = true;
     outputBState = false;
-    cycleStateB = {false, 0, false, -1};  // Reset Cycle Timer
+    cycleStateB = {false, 0, false, -1};
   }
   digitalWrite(OUTPUT_B_PIN, outputBState ? HIGH : LOW);
+
+  if (stateChanged || null_program_ids != last_null_program_ids) {
+    sendOutputStatus(null_program_ids);
+    last_null_program_ids = null_program_ids;
+  }
+  if (trigger_info != last_trigger_info) {
+    sendTriggerStatus(trigger_info);
+    last_trigger_info = trigger_info;
+  }
 }
 
 void setup() {
@@ -871,7 +1003,6 @@ void setup() {
   });
   ws.onEvent(onWsEvent);
   server.addHandler(&ws);
-    // ElegantOTA Setup
   ElegantOTA.begin(&server, OTA_USERNAME, OTA_PASSWORD);
   server.begin();
 }
@@ -919,6 +1050,6 @@ void loop() {
     updateOutputs();
     lastOutputUpdate = millis();
   }
-    ElegantOTA.loop(); // Handle OTA tasks
+  ElegantOTA.loop();
   delay(10);
 }
