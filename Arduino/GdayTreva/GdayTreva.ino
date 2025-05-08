@@ -9,8 +9,8 @@
 #include <time.h>
 #include <sys/time.h>
 #include <ElegantOTA.h>
-#include <map>    // For subscriber_epochs
-#include <vector> // For null_program_ids and trigger_info
+#include <map>     // For subscriber_epochs
+#include <vector>  // For null_program_ids and trigger_info
 
 #define FORMAT_LITTLEFS_IF_FAILED true
 
@@ -19,8 +19,8 @@
 #define OUTPUT_B_PIN 12
 
 // OTA Credentials
-const char* OTA_USERNAME = "admin";
-const char* OTA_PASSWORD = "admin";
+const char *OTA_USERNAME = "admin";
+const char *OTA_PASSWORD = "admin";
 
 // OTA Progress Tracking
 static unsigned long otaProgressMillis = 0;
@@ -33,8 +33,38 @@ struct Config {
   char internet_check_host[32];
   int time_offset_minutes;
 };
-
 Config config;
+
+struct CycleConfig {
+  int runSeconds = 0;
+  int stopSeconds = 0;
+  bool startHigh = false;
+  bool valid = false;
+};
+CycleConfig cycleConfigA, cycleConfigB;
+int activeProgramA = -1, activeProgramB = -1;
+
+std::vector<int> null_program_ids;
+
+struct ProgramConfig {
+  int id = -1;                // Program ID (1-10, -1 if invalid)
+  String output = "A";        // Output ("A", "B", or "Null")
+  String trigger = "Manual";  // Trigger ("Manual", "Cycle Timer", etc.)
+  bool active = false;        // Whether the program is active (from isProgramActive)
+};
+ProgramConfig programConfigs[11];
+
+// Cycle Timer state for each output
+struct CycleState {
+  bool isRunning;
+  unsigned long lastSwitchTime;
+  bool isOnPhase;
+  int activeProgram;
+  time_t nextToggle;
+};
+CycleState cycleStateA = { false, 0, false, -1 };
+CycleState cycleStateB = { false, 0, false, -1 };
+
 static bool eth_connected = false;
 static bool wifi_connected = false;
 static bool internet_connected = false;
@@ -48,44 +78,30 @@ unsigned long print_time_count = 0;
 const unsigned long ONE_DAY_MS = 24 * 60 * 60 * 1000UL;
 unsigned long totalHeap = 0;
 int numPrograms = 10;
+bool programsChanged = true;
+bool outputAState = false, outputBState = false;
 
 // Subscriber map and status tracking
-std::map<AsyncWebSocketClient*, uint32_t> subscriber_epochs;
+std::map<AsyncWebSocketClient *, uint32_t> subscriber_epochs;
 uint32_t last_output_epoch = 0;
 std::vector<int> last_null_program_ids;
 
 // Trigger info struct
 struct TriggerInfo {
-    int id;
-    String output;
-    String trigger;
-    time_t next_toggle; // Changed to time_t for epoch timestamp
-    String sensor_value;
-    bool state;
-    bool operator==(const TriggerInfo& other) const {
-        return id == other.id && output == other.output && trigger == other.trigger &&
-               next_toggle == other.next_toggle && sensor_value == other.sensor_value &&
-               state == other.state;
-    }
+  int id;
+  String output;
+  String trigger;
+  time_t next_toggle;
+  String sensor_value;
+  bool state;
+  bool operator==(const TriggerInfo &other) const {
+    return id == other.id && output == other.output && trigger == other.trigger && next_toggle == other.next_toggle && sensor_value == other.sensor_value && state == other.state;
+  }
 };
 std::vector<TriggerInfo> last_trigger_info;
 
-// Output states
-bool outputAState = false;
-bool outputBState = false;
-
-// Cycle Timer state for each output
-struct CycleState {
-  bool isRunning;
-  unsigned long lastSwitchTime;
-  bool isOnPhase;
-  int activeProgram;
-};
-CycleState cycleStateA = {false, 0, false, -1};
-CycleState cycleStateB = {false, 0, false, -1};
-
 // Sends output status to subscribed clients
-void sendOutputStatus(const std::vector<int>& null_program_ids) {
+void sendOutputStatus(const std::vector<int> &null_program_ids) {
   if (subscriber_epochs.empty()) return;
 
   uint32_t new_epoch = millis();
@@ -105,7 +121,7 @@ void sendOutputStatus(const std::vector<int>& null_program_ids) {
   String json;
   serializeJson(doc, json);
 
-  for (auto& pair : subscriber_epochs) {
+  for (auto &pair : subscriber_epochs) {
     if (new_epoch > pair.second) {
       pair.first->text(json);
       pair.second = new_epoch;
@@ -116,7 +132,7 @@ void sendOutputStatus(const std::vector<int>& null_program_ids) {
 }
 
 // Sends trigger status to subscribed clients
-void sendTriggerStatus(const std::vector<TriggerInfo>& trigger_info) {
+void sendTriggerStatus(const std::vector<TriggerInfo> &trigger_info) {
   if (subscriber_epochs.empty()) return;
 
   uint32_t new_epoch = millis();
@@ -125,13 +141,13 @@ void sendTriggerStatus(const std::vector<TriggerInfo>& trigger_info) {
   doc["epoch"] = new_epoch;
 
   JsonArray progs = doc.createNestedArray("progs");
-  for (const auto& info : trigger_info) {
+  for (const auto &info : trigger_info) {
     JsonObject prog = progs.createNestedObject();
     prog["id"] = info.id;
     prog["output"] = info.output;
     prog["trigger"] = info.trigger;
     if (info.output == "A" || info.output == "B") {
-      prog["state"] = info.state; // Add state for A/B outputs
+      prog["state"] = info.state;  // Add state for A/B outputs
     }
     if ((info.trigger == "Cycle Timer") && info.next_toggle > 0) {
       prog["next_toggle"] = info.next_toggle;
@@ -143,7 +159,7 @@ void sendTriggerStatus(const std::vector<TriggerInfo>& trigger_info) {
   String json;
   serializeJson(doc, json);
 
-  for (auto& pair : subscriber_epochs) {
+  for (auto &pair : subscriber_epochs) {
     if (new_epoch > pair.second) {
       pair.first->text(json);
       pair.second = new_epoch;
@@ -254,7 +270,7 @@ void onWsEvent(AsyncWebSocket *server, AsyncWebSocketClient *client, AwsEventTyp
         StaticJsonDocument<512> doc;
         DeserializationError error = deserializeJson(doc, (char *)data, len);
         if (!error) {
-          const char *command = doc["command"].as<const char*>();
+          const char *command = doc["command"].as<const char *>();
           if (command && strcmp(command, "subscribe_output_status") == 0) {
             subscriber_epochs[client] = 0;
             Serial.printf("Client #%u subscribed to status\n", client->id());
@@ -265,7 +281,7 @@ void onWsEvent(AsyncWebSocket *server, AsyncWebSocketClient *client, AwsEventTyp
           } else if (command && (strcmp(command, "get_output_status") == 0 || strcmp(command, "get_trigger_status") == 0)) {
             sendTriggerStatus(last_trigger_info);
           } else if (command && strcmp(command, "sync_time") == 0) {
-            const char *timeStr = doc["time"].as<const char*>();
+            const char *timeStr = doc["time"].as<const char *>();
             if (timeStr) {
               setTimeFromClient(timeStr);
             }
@@ -274,7 +290,7 @@ void onWsEvent(AsyncWebSocket *server, AsyncWebSocketClient *client, AwsEventTyp
           } else if (command && strcmp(command, "save_program") == 0) {
             handleSaveProgram(client, doc);
           } else if (strcmp(command, "get_program") == 0) {
-            const char *programID = doc["programID"].as<const char*>();
+            const char *programID = doc["programID"].as<const char *>();
             if (programID) handleGetProgram(client, programID);
             else sendErrorResponse(client, "", "Missing programID");
           } else if (command && strcmp(command, "set_time_offset") == 0) {
@@ -389,8 +405,8 @@ void handleGetProgram(AsyncWebSocketClient *client, const char *programID) {
 
 // Saves a program received via WebSocket
 void handleSaveProgram(AsyncWebSocketClient *client, const JsonDocument &doc) {
-  const char *programID = doc["programID"].as<const char*>();
-  const char *content = doc["content"].as<const char*>();
+  const char *programID = doc["programID"].as<const char *>();
+  const char *content = doc["content"].as<const char *>();
   if (!programID || !content) {
     sendProgramResponse(client, false, "Missing programID or content", "");
     return;
@@ -439,7 +455,7 @@ void handleSaveProgram(AsyncWebSocketClient *client, const JsonDocument &doc) {
 
   file.close();
   sendProgramResponse(client, true, "Program saved successfully", targetID.c_str());
-  updateOutputs(); // Trigger status updates
+  programsChanged = true;
 }
 
 // Sends current time and memory usage to all WebSocket clients
@@ -652,11 +668,11 @@ void readSettings() {
     return;
   }
   Serial.println("Read Config.");
-  strlcpy(config.ssid, doc["ssid"].as<const char*>() ?: "defaultSSID", sizeof(config.ssid));
-  strlcpy(config.password, doc["password"].as<const char*>() ?: "defaultPass", sizeof(config.password));
-  strlcpy(config.mdns_hostname, doc["mdns_hostname"].as<const char*>() ?: "gday", sizeof(config.mdns_hostname));
-  strlcpy(config.ntp_server, doc["ntp_server"].as<const char*>() ?: "pool.ntp.org", sizeof(config.ntp_server));
-  strlcpy(config.internet_check_host, doc["internet_check_host"].as<const char*>() ?: "1.1.1.1", sizeof(config.internet_check_host));
+  strlcpy(config.ssid, doc["ssid"].as<const char *>() ?: "defaultSSID", sizeof(config.ssid));
+  strlcpy(config.password, doc["password"].as<const char *>() ?: "defaultPass", sizeof(config.password));
+  strlcpy(config.mdns_hostname, doc["mdns_hostname"].as<const char *>() ?: "gday", sizeof(config.mdns_hostname));
+  strlcpy(config.ntp_server, doc["ntp_server"].as<const char *>() ?: "pool.ntp.org", sizeof(config.ntp_server));
+  strlcpy(config.internet_check_host, doc["internet_check_host"].as<const char *>() ?: "1.1.1.1", sizeof(config.internet_check_host));
   config.time_offset_minutes = doc["time_offset_minutes"].as<int>();
   file.close();
 }
@@ -699,8 +715,8 @@ void WIFI_Connect() {
 }
 
 // Parses ISO 8601 date-time (e.g., "2025-04-27T06:00")
-time_t parseISO8601(const char* dateTime) {
-  struct tm tm = {0};
+time_t parseISO8601(const char *dateTime) {
+  struct tm tm = { 0 };
   int year, month, day, hour, minute;
   if (sscanf(dateTime, "%d-%d-%dT%d:%d", &year, &month, &day, &hour, &minute) != 5) {
     return 0;
@@ -722,22 +738,22 @@ time_t getAdjustedTime() {
 }
 
 // Checks if a program is active based on date, time, and day
-bool isProgramActive(const JsonDocument& doc, int progNum) {
+bool isProgramActive(const JsonDocument &doc, int progNum) {
   bool enabled = doc["enabled"].as<bool>();
   if (!enabled) return false;
 
   time_t now = getAdjustedTime();
-  struct tm* timeinfo = localtime(&now);
+  struct tm *timeinfo = localtime(&now);
 
   bool startDateEnabled = doc["startDateEnabled"].as<bool>();
-  const char* startDate = doc["startDate"].as<const char*>();
+  const char *startDate = doc["startDate"].as<const char *>();
   if (startDateEnabled && startDate && strlen(startDate) > 0) {
     time_t start = parseISO8601(startDate);
     if (now < start) return false;
   }
 
   bool endDateEnabled = doc["endDateEnabled"].as<bool>();
-  const char* endDate = doc["endDate"].as<const char*>();
+  const char *endDate = doc["endDate"].as<const char *>();
   if (endDateEnabled && endDate && strlen(endDate) > 0) {
     time_t end = parseISO8601(endDate);
     if (now > end) return false;
@@ -745,8 +761,8 @@ bool isProgramActive(const JsonDocument& doc, int progNum) {
 
   bool startTimeEnabled = doc["startTimeEnabled"].as<bool>();
   bool endTimeEnabled = doc["endTimeEnabled"].as<bool>();
-  const char* startTime = doc["startTime"].as<const char*>();
-  const char* endTime = doc["endTime"].as<const char*>();
+  const char *startTime = doc["startTime"].as<const char *>();
+  const char *endTime = doc["endTime"].as<const char *>();
   if (startTimeEnabled && endTimeEnabled && startTime && endTime && strlen(startTime) > 0 && strlen(endTime) > 0) {
     int startHour, startMinute, endHour, endMinute;
     sscanf(startTime, "%d:%d", &startHour, &startMinute);
@@ -761,10 +777,10 @@ bool isProgramActive(const JsonDocument& doc, int progNum) {
   if (daysPerWeekEnabled) {
     JsonArrayConst selectedDays = doc["selectedDays"];
     if (!selectedDays.isNull() && selectedDays.size() > 0) {
-      const char* days[] = {"Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"};
-      const char* currentDay = days[timeinfo->tm_wday];
+      const char *days[] = { "Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday" };
+      const char *currentDay = days[timeinfo->tm_wday];
       bool dayMatch = false;
-      for (const char* day : selectedDays) {
+      for (const char *day : selectedDays) {
         if (strcmp(day, currentDay) == 0) {
           dayMatch = true;
           break;
@@ -778,191 +794,160 @@ bool isProgramActive(const JsonDocument& doc, int progNum) {
 }
 
 // Implements Cycle Timer trigger with startHigh option
-bool runCycleTimer(const JsonDocument& doc, CycleState& state, const char* output, time_t& next_toggle) {
-    JsonObjectConst runTime = doc["runTime"];
-    JsonObjectConst stopTime = doc["stopTime"];
-    if (runTime.isNull() || stopTime.isNull()) return false;
+std::pair<bool, time_t> runCycleTimer(const char *output, CycleState &state, const CycleConfig &config) {
+  if (!config.valid || config.runSeconds == 0 || config.stopSeconds == 0) {
+    return { false, 0 };
+  }
 
-    int runSeconds = (runTime["hours"].as<int>() * 3600) + (runTime["minutes"].as<int>() * 60) + (runTime["seconds"].as<int>());
-    int stopSeconds = (stopTime["hours"].as<int>() * 3600) + (stopTime["minutes"].as<int>() * 60) + (stopTime["seconds"].as<int>());
-    bool startHigh = doc["startHigh"].as<bool>();
-    if (runSeconds == 0 || stopSeconds == 0) return false;
+  time_t next_toggle = 0;
+  unsigned long now = millis();
+  time_t epoch_now = getAdjustedTime();
 
-    unsigned long now = millis();
-    time_t epoch_now = getAdjustedTime(); // Current epoch time in seconds
-    if (!state.isRunning) {
-        state.isRunning = true;
-        state.lastSwitchTime = now;
-        state.isOnPhase = startHigh;
-        unsigned long next_toggle_ms = now + (startHigh ? runSeconds : stopSeconds) * 1000;
-        next_toggle = epoch_now + ((next_toggle_ms - now) / 1000); // Convert to epoch
-        Serial.printf("Cycle Timer started for %s, next_toggle: %ld\n", output, next_toggle);
-        return state.isOnPhase;
-    }
+  if (!state.isRunning) {
+    state.isRunning = true;
+    state.lastSwitchTime = now;
+    state.isOnPhase = config.startHigh;
+    state.nextToggle = epoch_now + (config.startHigh ? config.runSeconds : config.stopSeconds);
+    return { state.isOnPhase, state.nextToggle };
+  }
 
-    unsigned long elapsed = now - state.lastSwitchTime;
-    if (state.isOnPhase && elapsed >= (unsigned long)runSeconds * 1000) {
-        state.isOnPhase = false;
-        state.lastSwitchTime = now;
-        next_toggle = epoch_now + stopSeconds; // Next toggle in seconds
-        Serial.printf("Cycle Timer for %s switched to off, next_toggle: %ld\n", output, next_toggle);
-        return false;
-    } else if (!state.isOnPhase && elapsed >= (unsigned long)stopSeconds * 1000) {
-        state.isOnPhase = true;
-        state.lastSwitchTime = now;
-        next_toggle = epoch_now + runSeconds; // Next toggle in seconds
-        Serial.printf("Cycle Timer for %s switched to on, next_toggle: %ld\n", output, next_toggle);
-        return true;
-    }
-    // Calculate remaining time in seconds
-    unsigned long remaining_ms = (state.isOnPhase ? runSeconds : stopSeconds) * 1000 - elapsed;
-    next_toggle = epoch_now + (remaining_ms / 1000);
-    return state.isOnPhase;
+  unsigned long elapsed = now - state.lastSwitchTime;
+  unsigned long cycle_duration_ms = (state.isOnPhase ? config.runSeconds : config.stopSeconds) * 1000;
+
+  if (elapsed >= cycle_duration_ms) {
+    state.isOnPhase = !state.isOnPhase;
+    state.lastSwitchTime = now;
+    state.nextToggle = epoch_now + (state.isOnPhase ? config.runSeconds : config.stopSeconds);
+    return { state.isOnPhase, state.nextToggle };
+  }
+
+  // Calculate next toggle time based on the last switch time
+  unsigned long time_since_last_switch_ms = now - state.lastSwitchTime;
+  unsigned long remaining_ms = cycle_duration_ms - time_since_last_switch_ms;
+  // Use ceiling to avoid truncation issues
+  next_toggle = epoch_now + (remaining_ms + 999) / 1000;  // Round up to next second
+  return { state.isOnPhase, state.nextToggle };
 }
 
-// Determines active programs and sets outputs A and B
 void updateOutputs() {
-    time_t now = getAdjustedTime();
-    if (now < 946684800) return;
+  time_t now = getAdjustedTime();
+  if (now < 946684800) {
+    digitalWrite(OUTPUT_A_PIN, LOW);
+    digitalWrite(OUTPUT_B_PIN, LOW);
+    outputAState = outputBState = false;
+    return;
+  }
 
-    int activeProgramA = -1;
-    int activeProgramB = -1;
-    std::vector<int> null_program_ids;
-    bool trigger_changed = false;
-
-    // First pass: Determine active programs and Null programs
+  if (programsChanged) {
+    activeProgramA = activeProgramB = -1;
+    null_program_ids.clear();
+    cycleConfigA = cycleConfigB = { 0, 0, false, false };
     for (int i = 1; i <= numPrograms; i++) {
-        String idStr = String(i);
-        if (i < 10) idStr = "0" + idStr;
-        String filename = "/program" + idStr + ".json";
-        if (!LittleFS.exists(filename)) continue;
-
-        File file = LittleFS.open(filename, FILE_READ);
-        if (!file) continue;
-        String content = file.readString();
-        file.close();
-
-        StaticJsonDocument<4096> doc;
-        if (deserializeJson(doc, content)) continue;
-        if (!isProgramActive(doc, i)) continue;
-
-        const char* output = doc["output"].as<const char*>() ?: "A";
-        if (strcmp(output, "A") == 0) {
-            if (activeProgramA == -1 || i < activeProgramA) activeProgramA = i;
-        } else if (strcmp(output, "B") == 0) {
-            if (activeProgramB == -1 || i < activeProgramB) activeProgramB = i;
-        } else if (strcmp(output, "Null") == 0) {
-            null_program_ids.push_back(i);
+      programConfigs[i] = { -1, "A", "Manual", false };  // Reset
+      String filename = "/program" + String(i < 10 ? "0" + String(i) : String(i)) + ".json";
+      if (!LittleFS.exists(filename)) continue;
+      File file = LittleFS.open(filename, FILE_READ);
+      if (!file) continue;
+      String content = file.readString();
+      file.close();
+      StaticJsonDocument<4096> doc;
+      if (deserializeJson(doc, content)) continue;
+      if (!isProgramActive(doc, i)) continue;
+      const char *output = doc["output"].as<const char *>() ?: "A";
+      const char *trigger = doc["trigger"].as<const char *>() ?: "Manual";
+      programConfigs[i] = { i, String(output), String(trigger), true };
+      if (strcmp(output, "A") == 0 && (activeProgramA == -1 || i < activeProgramA)) {
+        activeProgramA = i;
+        if (strcmp(trigger, "Cycle Timer") == 0) {
+          cycleConfigA.runSeconds = (doc["runTime"]["hours"].as<int>() * 3600) + (doc["runTime"]["minutes"].as<int>() * 60) + doc["runTime"]["seconds"].as<int>();
+          cycleConfigA.stopSeconds = (doc["stopTime"]["hours"].as<int>() * 3600) + (doc["stopTime"]["minutes"].as<int>() * 60) + doc["stopTime"]["seconds"].as<int>();
+          cycleConfigA.startHigh = doc["startHigh"].as<bool>();
+          cycleConfigA.valid = true;
         }
+      } else if (strcmp(output, "B") == 0 && (activeProgramB == -1 || i < activeProgramB)) {
+        activeProgramB = i;
+        if (strcmp(trigger, "Cycle Timer") == 0) {
+          cycleConfigB.runSeconds = (doc["runTime"]["hours"].as<int>() * 3600) + (doc["runTime"]["minutes"].as<int>() * 60) + doc["runTime"]["seconds"].as<int>();
+          cycleConfigB.stopSeconds = (doc["stopTime"]["hours"].as<int>() * 3600) + (doc["stopTime"]["minutes"].as<int>() * 60) + doc["stopTime"]["seconds"].as<int>();
+          cycleConfigB.startHigh = doc["startHigh"].as<bool>();
+          cycleConfigB.valid = true;
+        }
+      } else if (strcmp(output, "Null") == 0) {
+        null_program_ids.push_back(i);
+      }
     }
+    programsChanged = false;
+  }
 
-    // Second pass: Create trigger_info
-    std::vector<TriggerInfo> trigger_info;
-    auto addTriggerInfo = [&](int programId, bool state = false) {
-        if (programId == -1) return;
-        String filename = "/program" + String(programId < 10 ? "0" + String(programId) : String(programId)) + ".json";
-        File file = LittleFS.open(filename, FILE_READ);
-        if (!file) return;
-        String content = file.readString();
-        file.close();
-        StaticJsonDocument<4096> doc;
-        if (deserializeJson(doc, content)) return;
-        const char* output = doc["output"].as<const char*>() ?: "A";
-        TriggerInfo info = {programId, String(output), "", 0, "", state};
-        info.trigger = doc["trigger"].as<const char*>() ?: "Manual";
-        if (strcmp(output, "Null") == 0 && info.trigger != "Manual" && info.trigger != "Cycle Timer") {
-            info.sensor_value = "0";
-        }
-        trigger_info.push_back(info);
-    };
-
-    addTriggerInfo(activeProgramA, outputAState);
-    addTriggerInfo(activeProgramB, outputBState);
-    for (int id : null_program_ids) {
-        addTriggerInfo(id);
+  bool trigger_changed = false;
+  std::vector<TriggerInfo> trigger_info;
+  auto addTriggerInfo = [&](int programId, bool state = false, time_t next_toggle = 0) {
+    if (programId == -1 || programId < 1 || programId > numPrograms) return;
+    ProgramConfig &cfg = programConfigs[programId];
+    if (cfg.id == -1) return;  // Inactive program
+    TriggerInfo info = { programId, cfg.output, cfg.trigger, next_toggle, "", state };
+    if (cfg.output == "Null" && cfg.trigger != "Manual" && cfg.trigger != "Cycle Timer") {
+      info.sensor_value = "0";
     }
+    trigger_info.push_back(info);
+  };
 
-    // Output A
-    if (activeProgramA != -1) {
-        bool currentStateA = outputAState;
-        String filename = "/program" + String(activeProgramA < 10 ? "0" + String(activeProgramA) : String(activeProgramA)) + ".json";
-        File file = LittleFS.open(filename, FILE_READ);
-        String content = file.readString();
-        file.close();
-        StaticJsonDocument<4096> doc;
-        deserializeJson(doc, content);
-        const char* trigger = doc["trigger"].as<const char*>() ?: "Manual";
-        time_t next_toggle = 0;
-        if (cycleStateA.activeProgram != activeProgramA) {
-            cycleStateA = {false, 0, false, activeProgramA};
-            trigger_changed = true;
-        }
-        if (strcmp(trigger, "Manual") == 0) {
-            outputAState = true;
-        } else if (strcmp(trigger, "Cycle Timer") == 0) {
-            outputAState = runCycleTimer(doc, cycleStateA, "Output A", next_toggle);
-        }
-        if (currentStateA != outputAState) {
-            Serial.printf("Active program for A: %d, State: %d\n", activeProgramA, outputAState);
-            trigger_changed = true;
-        }
-        for (auto& info : trigger_info) {
-            if (info.id == activeProgramA) {
-                info.next_toggle = next_toggle;
-                info.state = outputAState;
-                Serial.printf("Updated trigger_info for program %d: next_toggle=%ld, state=%d\n", info.id, next_toggle, info.state);
-            }
-        }
-    } else {
-        if (outputAState) trigger_changed = true;
-        outputAState = false;
-        cycleStateA = {false, 0, false, -1};
+  // Output A
+  if (activeProgramA != -1) {
+    bool currentStateA = outputAState;
+    if (cycleStateA.activeProgram != activeProgramA) {
+      cycleStateA = { false, 0, false, activeProgramA };
+      trigger_changed = true;
     }
-    digitalWrite(OUTPUT_A_PIN, outputAState ? HIGH : LOW);
+    if (cycleConfigA.valid) {  // Cycle Timer
+      auto [state, next_toggle] = runCycleTimer("Output A", cycleStateA, cycleConfigA);
+      outputAState = state;
+      addTriggerInfo(activeProgramA, state, next_toggle);
+    } else {  // Manual
+      outputAState = true;
+      addTriggerInfo(activeProgramA, true);
+    }
+    if (currentStateA != outputAState) {
+      trigger_changed = true;
+      Serial.printf("Output A changed: Program %d, State %d\n", activeProgramA, outputAState);
+    }
+  } else {
+    if (outputAState) trigger_changed = true;
+    outputAState = false;
+    cycleStateA = { false, 0, false, -1 };
+  }
+  digitalWrite(OUTPUT_A_PIN, outputAState ? HIGH : LOW);
 
-    // Output B
-    if (activeProgramB != -1) {
-        bool currentStateB = outputBState;
-        String filename = "/program" + String(activeProgramB < 10 ? "0" + String(activeProgramB) : String(activeProgramB)) + ".json";
-        File file = LittleFS.open(filename, FILE_READ);
-        String content = file.readString();
-        file.close();
-        StaticJsonDocument<4096> doc;
-        deserializeJson(doc, content);
-        const char* trigger = doc["trigger"].as<const char*>() ?: "Manual";
-        time_t next_toggle = 0;
-        if (cycleStateB.activeProgram != activeProgramB) {
-            cycleStateB = {false, 0, false, activeProgramB};
-            trigger_changed = true;
-        }
-        if (strcmp(trigger, "Manual") == 0) {
-            outputBState = true;
-        } else if (strcmp(trigger, "Cycle Timer") == 0) {
-            outputBState = runCycleTimer(doc, cycleStateB, "Output B", next_toggle);
-        }
-        if (currentStateB != outputBState) {
-            Serial.printf("Output B change, Program: %d, State: %d\n", activeProgramB, outputBState);
-            trigger_changed = true;
-        }
-        for (auto& info : trigger_info) {
-            if (info.id == activeProgramB) {
-                info.next_toggle = next_toggle;
-                info.state = outputBState;
-                Serial.printf("Updated trigger_info for program %d: next_toggle=%ld, state=%d\n", info.id, next_toggle, info.state);
-            }
-        }
-    } else {
-        if (outputBState) trigger_changed = true;
-        outputBState = false;
-        cycleStateB = {false, 0, false, -1};
+  // Output B
+  if (activeProgramB != -1) {
+    bool currentStateB = outputBState;
+    if (cycleStateB.activeProgram != activeProgramB) {
+      cycleStateB = { false, 0, false, activeProgramB };
+      trigger_changed = true;
     }
-    digitalWrite(OUTPUT_B_PIN, outputBState ? HIGH : LOW);
+    if (cycleConfigB.valid) {  // Cycle Timer
+      auto [state, next_toggle] = runCycleTimer("Output B", cycleStateB, cycleConfigB);
+      outputBState = state;
+      addTriggerInfo(activeProgramB, state, next_toggle);
+    } else {  // Manual
+      outputBState = true;
+      addTriggerInfo(activeProgramB, true);
+    }
+    if (currentStateB != outputBState) {
+      trigger_changed = true;
+      Serial.printf("Output B changed: Program %d, State %d\n", activeProgramB, outputBState);
+    }
+  } else {
+    if (outputBState) trigger_changed = true;
+    outputBState = false;
+    cycleStateB = { false, 0, false, -1 };
+  }
+  digitalWrite(OUTPUT_B_PIN, outputBState ? HIGH : LOW);
 
-    if (trigger_changed || trigger_info != last_trigger_info) {
-        Serial.println("Trigger status changed, sending trigger_status");
-        sendTriggerStatus(trigger_info);
-        last_trigger_info = trigger_info;
-    }
+  if (trigger_changed || trigger_info != last_trigger_info) {
+    sendTriggerStatus(trigger_info);
+    last_trigger_info = trigger_info;
+  }
 }
 
 void setup() {
@@ -1060,8 +1045,12 @@ void loop() {
     strftime(timeStr, sizeof(timeStr), "%Y-%m-%d %H:%M:%S", gmtime(&now));
     Serial.print("UTC Time: ");
     Serial.print(timeStr);
-    Serial.print(" WiFi IP address: ");
-    Serial.print(WiFi.localIP().toString());
+    if (wifi_connected) {
+      Serial.print(" WiFi IP address: ");
+      Serial.print(WiFi.localIP().toString());
+    } else if (eth_connected) {
+      Serial.print(" Ethernet IP: " + ETH.localIP().toString());
+    }
     Serial.println(" Free heap: " + String(ESP.getFreeHeap()));
     print_time_count = millis();
   }
@@ -1069,12 +1058,12 @@ void loop() {
     checkInternetConnectivity();
   }
   static unsigned long lastTimeSend = 0;
-  if (millis() - lastTimeSend > 1000) {
+  if (millis() - lastTimeSend > 999) {
     sendTimeToClients();
     lastTimeSend = millis();
   }
   static unsigned long lastOutputUpdate = 0;
-  if (millis() - lastOutputUpdate > 1000) {
+  if (millis() - lastOutputUpdate > 100) {
     updateOutputs();
     lastOutputUpdate = millis();
   }
