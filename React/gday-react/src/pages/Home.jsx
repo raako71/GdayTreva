@@ -1,34 +1,52 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import PropTypes from 'prop-types';
 import '../styles.css';
 
-function Home({ triggerStatus, programs, message}) {
+// Utility function to format countdown seconds into a string
+const formatCountdown = (secondsLeft) => {
+  if (secondsLeft <= 0) return 'Toggling...';
+  const hours = Math.floor(secondsLeft / 3600);
+  const minutes = Math.floor((secondsLeft % 3600) / 60);
+  const seconds = secondsLeft % 60;
+  return `${hours.toString().padStart(2, '0')}h ${minutes
+    .toString()
+    .padStart(2, '0')}m ${seconds.toString().padStart(2, '0')}s`;
+};
+
+function Home({ triggerStatus, programs, message }) {
   const [countdowns, setCountdowns] = useState({});
+  const triggerStatusRef = useRef(triggerStatus);
+  const messageRef = useRef(message);
 
-  // Update countdowns every second for Cycle Timer triggers
+  // Update refs with latest props
   useEffect(() => {
-    if (!triggerStatus?.progs) return;
+    triggerStatusRef.current = triggerStatus;
+    messageRef.current = message;
+  }, [triggerStatus, message]);
 
+  // Update countdowns every second
+  useEffect(() => {
     const interval = setInterval(() => {
+      const currentTriggerStatus = triggerStatusRef.current;
+      const currentMessage = messageRef.current;
+
+      const progs = currentTriggerStatus?.progs || (currentTriggerStatus?.type === 'trigger_status' ? currentTriggerStatus.progs : null);
+
+      if (!progs || progs.length === 0 || currentMessage?.epoch == null) {
+        return;
+      }
+
       const newCountdowns = {};
-      triggerStatus.progs.forEach((prog) => {
-        if (prog.trigger === 'Cycle Timer' && prog.next_toggle) {
-          const secondsLeft = prog.next_toggle - message?.epoch;
-          if (secondsLeft > 0) {
-            const hours = Math.floor(secondsLeft / 3600);
-            const minutes = Math.floor((secondsLeft % 3600) / 60);
-            const seconds = secondsLeft % 60;
-            newCountdowns[prog.id] = `${hours.toString().padStart(2, '0')}h ${minutes
-              .toString()
-              .padStart(2, '0')}m ${seconds.toString().padStart(2, '0')}s`;
-          } else {
-            newCountdowns[prog.id] = 'Toggling...';
-          }
+
+      progs.forEach((prog) => {
+        if (prog.trigger === 'Cycle Timer' && typeof prog.next_toggle === 'number' && !isNaN(prog.next_toggle)) {
+          const secondsLeft = prog.next_toggle - currentMessage.epoch;
+          newCountdowns[String(prog.id)] = formatCountdown(secondsLeft);
         }
       });
+
       setCountdowns((prev) => {
-        // Only update if countdowns have changed to minimize re-renders
         const hasChanged = Object.keys(newCountdowns).some(
           (id) => newCountdowns[id] !== prev[id]
         );
@@ -37,52 +55,54 @@ function Home({ triggerStatus, programs, message}) {
     }, 1000);
 
     return () => clearInterval(interval);
-  }, [triggerStatus, message]);
+  }, []);
 
-  // Memoize the program tiles to prevent unnecessary re-renders
-  const programTiles = useMemo(() => {
-    if (!triggerStatus?.progs || triggerStatus.progs.length === 0) {
-      return <p>No active programs</p>;
-    }
-
-    return triggerStatus.progs.map((prog) => {
-      const programId = prog.id.toString().padStart(2, '0');
-      const program = programs.find((p) => p.id === programId);
-      return (
-        <div key={prog.id} className="Tile">
-          <h2>
-            <Link to={`/programEditor?programID=${programId}`}>
-              {program?.name || `Program${programId}`}
-            </Link>
-          </h2>
-          <p>Output: {prog.output}</p>
-          <p>State: {prog.state === undefined ? 'Unknown' : prog.state ? 'ON' : 'OFF'}</p>
-          <p>Trigger: {prog.trigger}</p>
-          {prog.trigger === 'Cycle Timer' && countdowns[prog.id] && (
-            <p>Next Toggle: {countdowns[prog.id]}</p>
-          )}
-        </div>
-      );
-    });
-  }, [triggerStatus, programs, countdowns]);
-
+  // Basic UI
   return (
     <div>
       <div className="Title">
         <h1>Home Page</h1>
       </div>
-      <div className="Tile-container">{programTiles}</div>
+      <div className="Tile-container">
+        {triggerStatus?.progs && triggerStatus.progs.length > 0 ? (
+          triggerStatus.progs.map((prog) => {
+            const programId = prog.id.toString().padStart(2, '0');
+            const program = programs.find((p) => p.id === programId) || { name: `Program${programId}` };
+            return (
+              <div key={prog.id} className="Tile">
+                <h2>
+                  <Link to={`/programEditor?programID=${programId}`}>
+                    {program.name}
+                  </Link>
+                </h2>
+                <p>Output: {prog.output}</p>
+                <p>State: {prog.state === undefined ? 'Unknown' : prog.state ? 'ON' : 'OFF'}</p>
+                <p>Trigger: {prog.trigger}</p>
+                {prog.trigger === 'Cycle Timer' && (
+                  <p>
+                    Next Toggle:{' '}
+                    {countdowns[String(prog.id)] || 'Awaiting Schedule'}
+                  </p>
+                )}
+              </div>
+            );
+          })
+        ) : (
+          <p>No active programs</p>
+        )}
+      </div>
     </div>
   );
 }
 
 Home.propTypes = {
   triggerStatus: PropTypes.shape({
+    type: PropTypes.string,
     epoch: PropTypes.number,
     progs: PropTypes.arrayOf(
       PropTypes.shape({
         id: PropTypes.number.isRequired,
-        output: PropTypes.string.isRequired,
+        output: PropTypes.string,
         trigger: PropTypes.string.isRequired,
         next_toggle: PropTypes.number,
         state: PropTypes.bool,
@@ -94,7 +114,20 @@ Home.propTypes = {
       id: PropTypes.string.isRequired,
       name: PropTypes.string,
     })
-  ).isRequired,
+  ),
+  message: PropTypes.shape({
+    epoch: PropTypes.number.isRequired,
+    offset_minutes: PropTypes.number,
+    mem_used: PropTypes.number,
+    mem_total: PropTypes.number,
+    type: PropTypes.string,
+  }),
+};
+
+Home.defaultProps = {
+  triggerStatus: { progs: [] },
+  programs: [],
+  message: { epoch: 0 },
 };
 
 export default Home;
