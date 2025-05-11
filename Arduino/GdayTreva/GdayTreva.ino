@@ -801,7 +801,8 @@ std::pair<bool, time_t> runCycleTimer(const char *output, CycleState &state, con
 
   time_t next_toggle = 0;
   unsigned long now = millis();
-  time_t epoch_now = getAdjustedTime();
+  time_t epoch_now = time(nullptr);
+  //time_t epoch_now = getAdjustedTime();
 
   if (!state.isRunning) {
     state.isRunning = true;
@@ -1068,5 +1069,4 @@ void loop() {
     lastOutputUpdate = millis();
   }
   ElegantOTA.loop();
-  delay(10);
 }

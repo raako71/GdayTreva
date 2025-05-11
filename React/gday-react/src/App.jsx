@@ -127,7 +127,7 @@ function App() {
                 setMessage((prev) => ({ ...prev, offset_minutes: data.offset_minutes }));
                 break;
               case 'trigger_status':
-                console.log('Received trigger_status:', data);
+                //console.log('Received trigger_status:', data);
                 setTriggerStatus(data);
                 break;
               default:
