@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import PropTypes from 'prop-types';
 import '../styles.css';
@@ -57,39 +57,43 @@ function Home({ triggerStatus, programs, message }) {
     return () => clearInterval(interval);
   }, []);
 
-  // Basic UI
+  // Memoize program tiles to prevent unnecessary re-renders
+  const programTiles = useMemo(() => {
+    if (!triggerStatus?.progs || triggerStatus.progs.length === 0) {
+      return <p>No active programs</p>;
+    }
+
+    return triggerStatus.progs.map((prog) => {
+      const programId = prog.id.toString().padStart(2, '0');
+      const program = programs.find((p) => p.id === programId) || { name: `Program${programId}` };
+      return (
+        <div key={prog.id} className="Tile">
+          <h2>
+            <Link to={`/programEditor?programID=${programId}`}>
+              {program.name}
+            </Link>
+          </h2>
+          <p>Output: {prog.output}</p>
+          <p>State: {prog.state === undefined ? 'Unknown' : prog.state ? 'ON' : 'OFF'}</p>
+          <p>Trigger: {prog.trigger}</p>
+          {prog.trigger === 'Cycle Timer' && (
+            <p>
+              Next Toggle:{' '}
+              {countdowns[String(prog.id)] || 'Awaiting Schedule'}
+            </p>
+          )}
+        </div>
+      );
+    });
+  }, [triggerStatus, programs, countdowns]);
+
   return (
     <div>
       <div className="Title">
         <h1>Home Page</h1>
       </div>
       <div className="Tile-container">
-        {triggerStatus?.progs && triggerStatus.progs.length > 0 ? (
-          triggerStatus.progs.map((prog) => {
-            const programId = prog.id.toString().padStart(2, '0');
-            const program = programs.find((p) => p.id === programId) || { name: `Program${programId}` };
-            return (
-              <div key={prog.id} className="Tile">
-                <h2>
-                  <Link to={`/programEditor?programID=${programId}`}>
-                    {program.name}
-                  </Link>
-                </h2>
-                <p>Output: {prog.output}</p>
-                <p>State: {prog.state === undefined ? 'Unknown' : prog.state ? 'ON' : 'OFF'}</p>
-                <p>Trigger: {prog.trigger}</p>
-                {prog.trigger === 'Cycle Timer' && (
-                  <p>
-                    Next Toggle:{' '}
-                    {countdowns[String(prog.id)] || 'Awaiting Schedule'}
-                  </p>
-                )}
-              </div>
-            );
-          })
-        ) : (
-          <p>No active programs</p>
-        )}
+        {programTiles}
       </div>
     </div>
   );
