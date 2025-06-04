@@ -3,7 +3,7 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import '../styles.css';
 import PropTypes from 'prop-types';
 
-function ProgramEditor({ wsRef, isWsReady }) {
+function ProgramEditor({ wsRef, isWsReady, programs }) {
   const [programID, setProgramID] = useState('00');
   const [name, setName] = useState('');
   const [enabled, setEnabled] = useState(false);
@@ -21,7 +21,7 @@ function ProgramEditor({ wsRef, isWsReady }) {
   const [trigger, setTrigger] = useState('Manual');
   const [runTime, setRunTime] = useState({ seconds: '', minutes: '', hours: '' });
   const [stopTime, setStopTime] = useState({ seconds: '', minutes: '', hours: '' });
-  const [startHigh, setStartHigh] = useState(true);  // New state for Cycle Timer start phase
+  const [startHigh, setStartHigh] = useState(true);
   const [error, setError] = useState(null);
   const [status, setStatus] = useState('');
   const location = useLocation();
@@ -47,20 +47,45 @@ function ProgramEditor({ wsRef, isWsReady }) {
       if (!isNaN(parsedID) && parsedID >= 1 && parsedID <= 10) {
         const formattedID = parsedID.toString().padStart(2, '0');
         setProgramID(formattedID);
-        hasFetched.current = false;
+
+        // Find the program in the passed programs array
+        const program = programs.find((p) => p.id === formattedID);
+        if (program) {
+          setName(program.name || '');
+          setEnabled(program.enabled || false);
+          setOutput(program.output || 'A');
+          setStartDate(program.startDate || '');
+          setStartDateEnabled(program.startDateEnabled !== false);
+          setEndDate(program.endDate || '');
+          setEndDateEnabled(program.endDateEnabled !== false);
+          setStartTime(program.startTime || '00:00');
+          setStartTimeEnabled(program.startTimeEnabled !== false);
+          setEndTime(program.endTime || '23:59');
+          setEndTimeEnabled(program.endTimeEnabled !== false);
+          setSelectedDays(program.selectedDays || []);
+          setDaysPerWeekEnabled(program.daysPerWeekEnabled !== false);
+          setTrigger(program.trigger || 'Manual');
+          setRunTime({
+            seconds: program.runTime?.seconds?.toString() || '',
+            minutes: program.runTime?.minutes?.toString() || '',
+            hours: program.runTime?.hours?.toString() || '',
+          });
+          setStopTime({
+            seconds: program.stopTime?.seconds?.toString() || '',
+            minutes: program.stopTime?.minutes?.toString() || '',
+            hours: program.stopTime?.hours?.toString() || '',
+          });
+          setStartHigh(program.startHigh !== false);
+          setStatus(`Loaded program ${formattedID}`);
+          setError(null);
+        } else {
+          setError(`Program with ID ${formattedID} not found`);
+        }
       } else {
         setError('Invalid programID in URL (must be 1 to 10)');
       }
     }
-  }, [location]);
-
-  useEffect(() => {
-    if (!isWsReady || !programID || programID === '00' || hasFetched.current) return;
-
-    wsRef.current.send(JSON.stringify({ command: 'get_program', programID }));
-    setStatus(`Requesting program ${programID}`);
-    hasFetched.current = true;
-  }, [isWsReady, programID, wsRef]);
+  }, [location, programs]);
 
   useEffect(() => {
     if (!wsRef.current) return;
@@ -69,41 +94,7 @@ function ProgramEditor({ wsRef, isWsReady }) {
     const handleMessage = (event) => {
       try {
         const data = JSON.parse(event.data);
-        if (data.type === 'get_program_response') {
-          if (data.success) {
-            const content = JSON.parse(data.content);
-            setName(content.name || '');
-            setEnabled(content.enabled || false);
-            setOutput(content.output || 'A');
-            setStartDate(content.startDate || '');
-            setStartDateEnabled(content.startDateEnabled !== false);
-            setEndDate(content.endDate || '');
-            setEndDateEnabled(content.endDateEnabled !== false);
-            setStartTime(content.startTime || '00:00');
-            setStartTimeEnabled(content.startTimeEnabled !== false);
-            setEndTime(content.endTime || '23:59');
-            setEndTimeEnabled(content.endTimeEnabled !== false);
-            setSelectedDays(content.selectedDays || []);
-            setDaysPerWeekEnabled(content.daysPerWeekEnabled !== false);
-            setTrigger(content.trigger || 'Manual');
-            setRunTime({
-              seconds: content.runTime?.seconds?.toString() || '',
-              minutes: content.runTime?.minutes?.toString() || '',
-              hours: content.runTime?.hours?.toString() || '',
-            });
-            setStopTime({
-              seconds: content.stopTime?.seconds?.toString() || '',
-              minutes: content.stopTime?.minutes?.toString() || '',
-              hours: content.stopTime?.hours?.toString() || '',
-            });
-            setStartHigh(content.startHigh !== false);  // Load startHigh, default true
-            setStatus(`Loaded program ${data.programID}`);
-            setError(null);
-          } else {
-            setError(`Failed to load program ${data.programID}: ${data.message}`);
-            setStatus('');
-          }
-        } else if (data.type === 'save_program_response') {
+        if (data.type === 'save_program_response') {
           if (data.success) {
             const assignedID = data.programID || programID;
             setProgramID(assignedID);
@@ -658,10 +649,40 @@ function ProgramEditor({ wsRef, isWsReady }) {
 }
 
 ProgramEditor.propTypes = {
-  wsRef: PropTypes.shape({
-    current: PropTypes.instanceOf(WebSocket),
-  }).isRequired,
-  isWsReady: PropTypes.bool.isRequired,
-};
-
+    wsRef: PropTypes.shape({
+      current: PropTypes.instanceOf(WebSocket),
+    }).isRequired,
+    isWsReady: PropTypes.bool.isRequired,
+    programs: PropTypes.arrayOf(
+      PropTypes.shape({
+        id: PropTypes.string.isRequired,
+        name: PropTypes.string,
+        enabled: PropTypes.bool,
+        output: PropTypes.string,
+        startDate: PropTypes.string,
+        startDateEnabled: PropTypes.bool,
+        endDate: PropTypes.string,
+        endDateEnabled: PropTypes.bool,
+        startTime: PropTypes.string,
+        startTimeEnabled: PropTypes.bool,
+        endTime: PropTypes.string,
+        endTimeEnabled: PropTypes.bool,
+        selectedDays: PropTypes.arrayOf(PropTypes.string),
+        daysPerWeekEnabled: PropTypes.bool,
+        trigger: PropTypes.string,
+        runTime: PropTypes.shape({
+          seconds: PropTypes.oneOfType([PropTypes.number, PropTypes.string]),
+          minutes: PropTypes.oneOfType([PropTypes.number, PropTypes.string]),
+          hours: PropTypes.oneOfType([PropTypes.number, PropTypes.string]),
+        }),
+        stopTime: PropTypes.shape({
+          seconds: PropTypes.oneOfType([PropTypes.number, PropTypes.string]),
+          minutes: PropTypes.oneOfType([PropTypes.number, PropTypes.string]),
+          hours: PropTypes.oneOfType([PropTypes.number, PropTypes.string]),
+        }),
+        startHigh: PropTypes.bool,
+      })
+    ).isRequired,
+  };
+  
 export default ProgramEditor;

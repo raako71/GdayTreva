@@ -26,3 +26,4 @@ R0.23: ProgramEditor bugs.
 R0.24: Pass Program state to components from App.
 R0.25: Widgets start.
 R0.26: Widget resolved.
+R0.27: pull programs from App.jsx

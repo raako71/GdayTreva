@@ -179,7 +179,8 @@ function App() {
         <Route path="/graph" element={<Graph />} />
         <Route path="/settings" element={<Settings requestNetworkInfo={requestNetworkInfo} networkInfo={networkInfo} connectionStatus={connectionStatus} />} />
         <Route path="/programs" element={<Programs wsRef={wsRef} isWsReady={isWsReady} triggerStatus={triggerStatus} programs={programs} />} />
-        <Route path="/programEditor" element={<ProgramEditor wsRef={wsRef} isWsReady={isWsReady} />} />
+        <Route path="/programEditor" element={<ProgramEditor wsRef={wsRef} isWsReady={isWsReady} programs={programs} />}
+/>
       </Routes>
     </div>
   );
