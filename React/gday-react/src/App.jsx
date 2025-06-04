@@ -113,6 +113,9 @@ function App() {
                 break;
               case 'save_program_response':
                 console.log('Save program response:', data);
+                if (data.success && data.programID) {
+                  wsRef.current.send(JSON.stringify({ command: 'get_program', programID: data.programID }));
+                }
                 break;
               case 'get_program_response':
                 if (data.success && data.content) {
