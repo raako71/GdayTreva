@@ -19,6 +19,13 @@ function App() {
   const [triggerStatus, setTriggerStatus] = useState(null);
   const [programs, setPrograms] = useState([]);
 
+  // Dummy sensor data
+  const sensors = [
+    { id: 'temp1', name: 'Temperature XX' },
+    { id: 'humid1', name: 'Humidity XX' },
+    { id: 'volt1', name: 'Voltage XX' },
+  ];
+
   const requestNetworkInfo = useCallback(() => {
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
       wsRef.current.send(JSON.stringify({ command: 'get_network_info' }));
@@ -179,7 +186,7 @@ function App() {
         <Route path="/graph" element={<Graph />} />
         <Route path="/settings" element={<Settings requestNetworkInfo={requestNetworkInfo} networkInfo={networkInfo} connectionStatus={connectionStatus} />} />
         <Route path="/programs" element={<Programs wsRef={wsRef} isWsReady={isWsReady} triggerStatus={triggerStatus} programs={programs} />} />
-        <Route path="/programEditor" element={<ProgramEditor wsRef={wsRef} isWsReady={isWsReady} programs={programs} />}
+        <Route path="/programEditor" element={<ProgramEditor wsRef={wsRef} isWsReady={isWsReady} programs={programs} sensors={sensors}/>}
 />
       </Routes>
     </div>

@@ -3,10 +3,11 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import '../styles.css';
 import PropTypes from 'prop-types';
 
-function ProgramEditor({ wsRef, isWsReady, programs }) {
+function ProgramEditor({ wsRef, isWsReady, programs, sensors }) {
   const [programID, setProgramID] = useState('00');
   const [name, setName] = useState('');
   const [enabled, setEnabled] = useState(false);
+  const [isMonitorOnly, setIsMonitorOnly] = useState(false); // New state for Monitor only
   const [output, setOutput] = useState('A');
   const [startDate, setStartDate] = useState('');
   const [startDateEnabled, setStartDateEnabled] = useState(true);
@@ -26,7 +27,6 @@ function ProgramEditor({ wsRef, isWsReady, programs }) {
   const [status, setStatus] = useState('');
   const location = useLocation();
   const navigate = useNavigate();
-  const hasFetched = useRef(false);
   const fileInputRef = useRef(null);
 
   const daysOfWeek = [
@@ -39,6 +39,19 @@ function ProgramEditor({ wsRef, isWsReady, programs }) {
     'Sunday',
   ];
 
+  // Define trigger options
+  const standardTriggers = [
+    { value: 'Manual', label: 'Manual' },
+    { value: 'Cycle Timer', label: 'Cycle Timer' },
+  ];
+  const sensorTriggers = sensors.map((sensor) => ({
+    value: sensor.id,
+    label: sensor.name,
+  }));
+  const triggerOptions = isMonitorOnly
+    ? sensorTriggers
+    : [...standardTriggers, ...sensorTriggers];
+
   useEffect(() => {
     const params = new URLSearchParams(location.search);
     const id = params.get('programID');
@@ -48,12 +61,12 @@ function ProgramEditor({ wsRef, isWsReady, programs }) {
         const formattedID = parsedID.toString().padStart(2, '0');
         setProgramID(formattedID);
 
-        // Find the program in the passed programs array
         const program = programs.find((p) => p.id === formattedID);
         if (program) {
           setName(program.name || '');
           setEnabled(program.enabled || false);
-          setOutput(program.output || 'A');
+          setIsMonitorOnly(program.output === 'null');
+          setOutput(program.output === 'null' ? 'null' : program.output || 'A');
           setStartDate(program.startDate || '');
           setStartDateEnabled(program.startDateEnabled !== false);
           setEndDate(program.endDate || '');
@@ -135,6 +148,7 @@ function ProgramEditor({ wsRef, isWsReady, programs }) {
   };
 
   const validateProgram = () => {
+    if (isMonitorOnly) return null; // Skip validation for monitor-only mode
     if (startDateEnabled && endDateEnabled && startDate && endDate) {
       const start = new Date(startDate);
       const end = new Date(endDate);
@@ -171,19 +185,19 @@ function ProgramEditor({ wsRef, isWsReady, programs }) {
     const programContent = {
       name,
       enabled,
-      output,
-      startDate: startDateEnabled ? startDate : '',
-      startDateEnabled,
-      endDate: endDateEnabled ? endDate : '',
-      endDateEnabled,
-      startTime: startTimeEnabled ? startTime : '',
-      startTimeEnabled,
-      endTime: endTimeEnabled ? endTime : '',
-      endTimeEnabled,
-      selectedDays: daysPerWeekEnabled ? selectedDays : [],
-      daysPerWeekEnabled,
+      output: isMonitorOnly ? 'null' : output,
+      startDate: isMonitorOnly ? '' : startDateEnabled ? startDate : '',
+      startDateEnabled: isMonitorOnly ? false : startDateEnabled,
+      endDate: isMonitorOnly ? '' : endDateEnabled ? endDate : '',
+      endDateEnabled: isMonitorOnly ? false : endDateEnabled,
+      startTime: isMonitorOnly ? '' : startTimeEnabled ? startTime : '',
+      startTimeEnabled: isMonitorOnly ? false : startTimeEnabled,
+      endTime: isMonitorOnly ? '' : endTimeEnabled ? endTime : '',
+      endTimeEnabled: isMonitorOnly ? false : endTimeEnabled,
+      selectedDays: isMonitorOnly ? [] : daysPerWeekEnabled ? selectedDays : [],
+      daysPerWeekEnabled: isMonitorOnly ? false : daysPerWeekEnabled,
       trigger,
-      ...(trigger === 'Cycle Timer' && {
+      ...(trigger === 'Cycle Timer' && !isMonitorOnly && {
         runTime: {
           seconds: parseInt(runTime.seconds) || 0,
           minutes: parseInt(runTime.minutes) || 0,
@@ -194,7 +208,7 @@ function ProgramEditor({ wsRef, isWsReady, programs }) {
           minutes: parseInt(stopTime.minutes) || 0,
           hours: parseInt(stopTime.hours) || 0,
         },
-        startHigh,  // Include startHigh for Cycle Timer
+        startHigh,
       }),
     };
 
@@ -254,7 +268,8 @@ function ProgramEditor({ wsRef, isWsReady, programs }) {
         const content = JSON.parse(e.target.result);
         setName(content.name || '');
         setEnabled(content.enabled || false);
-        setOutput(content.output || 'A');
+        setIsMonitorOnly(content.output === 'null');
+        setOutput(content.output === 'null' ? 'null' : content.output || 'A');
         setStartDate(content.startDate || '');
         setStartDateEnabled(content.startDateEnabled !== false);
         setEndDate(content.endDate || '');
@@ -276,7 +291,7 @@ function ProgramEditor({ wsRef, isWsReady, programs }) {
           minutes: content.stopTime?.minutes?.toString() || '',
           hours: content.stopTime?.hours?.toString() || '',
         });
-        setStartHigh(content.startHigh !== false);  // Load startHigh, default true
+        setStartHigh(content.startHigh !== false);
         setStatus('Program imported successfully');
         setError(null);
       } catch (err) {
@@ -297,19 +312,19 @@ function ProgramEditor({ wsRef, isWsReady, programs }) {
     const programContent = {
       name,
       enabled,
-      output,
-      startDate: startDateEnabled ? startDate : '',
-      startDateEnabled,
-      endDate: endDateEnabled ? endDate : '',
-      endDateEnabled,
-      startTime: startTimeEnabled ? startTime : '',
-      startTimeEnabled,
-      endTime: endTimeEnabled ? endTime : '',
-      endTimeEnabled,
-      selectedDays: daysPerWeekEnabled ? selectedDays : [],
-      daysPerWeekEnabled,
+      output: isMonitorOnly ? 'null' : output,
+      startDate: isMonitorOnly ? '' : startDateEnabled ? startDate : '',
+      startDateEnabled: isMonitorOnly ? false : startDateEnabled,
+      endDate: isMonitorOnly ? '' : endDateEnabled ? endDate : '',
+      endDateEnabled: isMonitorOnly ? false : endDateEnabled,
+      startTime: isMonitorOnly ? '' : startTimeEnabled ? startTime : '',
+      startTimeEnabled: isMonitorOnly ? false : startTimeEnabled,
+      endTime: isMonitorOnly ? '' : endTimeEnabled ? endTime : '',
+      endTimeEnabled: isMonitorOnly ? false : endTimeEnabled,
+      selectedDays: isMonitorOnly ? [] : daysPerWeekEnabled ? selectedDays : [],
+      daysPerWeekEnabled: isMonitorOnly ? false : daysPerWeekEnabled,
       trigger,
-      ...(trigger === 'Cycle Timer' && {
+      ...(trigger === 'Cycle Timer' && !isMonitorOnly && {
         runTime: {
           seconds: parseInt(runTime.seconds) || 0,
           minutes: parseInt(runTime.minutes) || 0,
@@ -320,7 +335,7 @@ function ProgramEditor({ wsRef, isWsReady, programs }) {
           minutes: parseInt(stopTime.minutes) || 0,
           hours: parseInt(stopTime.hours) || 0,
         },
-        startHigh,  // Include startHigh for Cycle Timer
+        startHigh,
       }),
     };
 
@@ -374,6 +389,25 @@ function ProgramEditor({ wsRef, isWsReady, programs }) {
         </label>
       </div>
       <div className="form-group">
+        <label>Monitor only (no output):</label>
+        <label className="toggle-switch">
+          <input
+            type="checkbox"
+            checked={isMonitorOnly}
+            onChange={(e) => {
+              setIsMonitorOnly(e.target.checked);
+              if (e.target.checked) {
+                setOutput('null');
+                setTrigger(sensorTriggers[0]?.value || 'Manual');
+              } else {
+                setOutput('A');
+              }
+            }}
+          />
+          <span className="toggle-slider enabled-slider"></span>
+        </label>
+      </div>
+      <div className="form-group">
         <label htmlFor="name">Name:</label>
         <input
           id="name"
@@ -384,148 +418,152 @@ function ProgramEditor({ wsRef, isWsReady, programs }) {
           className="input-field"
         />
       </div>
-      <div className="form-group">
-        <label>Start Date and Time Enabled:</label>
-        <label className="toggle-switch">
-          <input
-            type="checkbox"
-            checked={startDateEnabled}
-            onChange={(e) => setStartDateEnabled(e.target.checked)}
-          />
-          <span className="toggle-slider enabled-slider"></span>
-        </label>
-      </div>
-      {startDateEnabled && (
-        <div className="form-group">
-          <label htmlFor="startDate">Start Date and Time:</label>
-          <input
-            id="startDate"
-            type="datetime-local"
-            value={startDate}
-            onChange={(e) => setStartDate(e.target.value)}
-            className="input-field"
-          />
-          <small className="form-text">When the program begins.</small>
-        </div>
-      )}
-      <div className="form-group">
-        <label>Daily Start Time Enabled:</label>
-        <label className="toggle-switch">
-          <input
-            type="checkbox"
-            checked={startTimeEnabled}
-            onChange={(e) => setStartTimeEnabled(e.target.checked)}
-          />
-          <span className="toggle-slider enabled-slider"></span>
-        </label>
-      </div>
-      {startTimeEnabled && (
-        <div className="form-group">
-          <label htmlFor="startTime">Daily Start Time:</label>
-          <input
-            id="startTime"
-            type="time"
-            value={startTime}
-            onChange={(e) => setStartTime(e.target.value)}
-            className="input-field"
-          />
-          <small className="form-text">Time when the program starts each day.</small>
-        </div>
-      )}
-      <div className="form-group">
-        <label>End Date and Time Enabled:</label>
-        <label className="toggle-switch">
-          <input
-            type="checkbox"
-            checked={endDateEnabled}
-            onChange={(e) => setEndDateEnabled(e.target.checked)}
-          />
-          <span className="toggle-slider enabled-slider"></span>
-        </label>
-      </div>
-      {endDateEnabled && (
-        <div className="form-group">
-          <label htmlFor="endDate">End Date and Time:</label>
-          <input
-            id="endDate"
-            type="datetime-local"
-            value={endDate}
-            onChange={(e) => setEndDate(e.target.value)}
-            className="input-field"
-          />
-          <small className="form-text">When the program ends.</small>
-        </div>
-      )}
-      <div className="form-group">
-        <label>Daily End Time Enabled:</label>
-        <label className="toggle-switch">
-          <input
-            type="checkbox"
-            checked={endTimeEnabled}
-            onChange={(e) => setEndTimeEnabled(e.target.checked)}
-          />
-          <span className="toggle-slider enabled-slider"></span>
-        </label>
-      </div>
-      {endTimeEnabled && (
-        <div className="form-group">
-          <label htmlFor="endTime">Daily End Time:</label>
-          <input
-            id="endTime"
-            type="time"
-            value={endTime}
-            onChange={(e) => setEndTime(e.target.value)}
-            className="input-field"
-          />
-          <small className="form-text">Time when the program ends each day.</small>
-        </div>
-      )}
-      <div className="form-group">
-        <label>Days per Week Enabled:</label>
-        <label className="toggle-switch">
-          <input
-            type="checkbox"
-            checked={daysPerWeekEnabled}
-            onChange={(e) => setDaysPerWeekEnabled(e.target.checked)}
-          />
-          <span className="toggle-slider enabled-slider"></span>
-        </label>
-      </div>
-      {daysPerWeekEnabled && (
-        <div className="form-group days-group">
-          <label>Days per Week:</label>
-          <div className="checkbox-group">
-            {daysOfWeek.map((day) => (
-              <label key={day} className="checkbox-label">
+      {!isMonitorOnly && (
+        <>
+          <div className="form-group">
+            <label>Start Date and Time Enabled:</label>
+            <label className="toggle-switch">
+              <input
+                type="checkbox"
+                checked={startDateEnabled}
+                onChange={(e) => setStartDateEnabled(e.target.checked)}
+              />
+              <span className="toggle-slider enabled-slider"></span>
+            </label>
+          </div>
+          {startDateEnabled && (
+            <div className="form-group">
+              <label htmlFor="startDate">Start Date and Time:</label>
+              <input
+                id="startDate"
+                type="datetime-local"
+                value={startDate}
+                onChange={(e) => setStartDate(e.target.value)}
+                className="input-field"
+              />
+              <small className="form-text">When the program begins.</small>
+            </div>
+          )}
+          <div className="form-group">
+            <label>Daily Start Time Enabled:</label>
+            <label className="toggle-switch">
+              <input
+                type="checkbox"
+                checked={startTimeEnabled}
+                onChange={(e) => setStartTimeEnabled(e.target.checked)}
+              />
+              <span className="toggle-slider enabled-slider"></span>
+            </label>
+          </div>
+          {startTimeEnabled && (
+            <div className="form-group">
+              <label htmlFor="startTime">Daily Start Time:</label>
+              <input
+                id="startTime"
+                type="time"
+                value={startTime}
+                onChange={(e) => setStartTime(e.target.value)}
+                className="input-field"
+              />
+              <small className="form-text">Time when the program starts each day.</small>
+            </div>
+          )}
+          <div className="form-group">
+            <label>End Date and Time Enabled:</label>
+            <label className="toggle-switch">
+              <input
+                type="checkbox"
+                checked={endDateEnabled}
+                onChange={(e) => setEndDateEnabled(e.target.checked)}
+              />
+              <span className="toggle-slider enabled-slider"></span>
+            </label>
+          </div>
+          {endDateEnabled && (
+            <div className="form-group">
+              <label htmlFor="endDate">End Date and Time:</label>
+              <input
+                id="endDate"
+                type="datetime-local"
+                value={endDate}
+                onChange={(e) => setEndDate(e.target.value)}
+                className="input-field"
+              />
+              <small className="form-text">When the program ends.</small>
+            </div>
+          )}
+          <div className="form-group">
+            <label>Daily End Time Enabled:</label>
+            <label className="toggle-switch">
+              <input
+                type="checkbox"
+                checked={endTimeEnabled}
+                onChange={(e) => setEndTimeEnabled(e.target.checked)}
+              />
+              <span className="toggle-slider enabled-slider"></span>
+            </label>
+          </div>
+          {endTimeEnabled && (
+            <div className="form-group">
+              <label htmlFor="endTime">Daily End Time:</label>
+              <input
+                id="endTime"
+                type="time"
+                value={endTime}
+                onChange={(e) => setEndTime(e.target.value)}
+                className="input-field"
+              />
+              <small className="form-text">Time when the program ends each day.</small>
+            </div>
+          )}
+          <div className="form-group">
+            <label>Days per Week Enabled:</label>
+            <label className="toggle-switch">
+              <input
+                type="checkbox"
+                checked={daysPerWeekEnabled}
+                onChange={(e) => setDaysPerWeekEnabled(e.target.checked)}
+              />
+              <span className="toggle-slider enabled-slider"></span>
+            </label>
+          </div>
+          {daysPerWeekEnabled && (
+            <div className="form-group days-group">
+              <label>Days per Week:</label>
+              <div className="checkbox-group">
+                {daysOfWeek.map((day) => (
+                  <label key={day} className="checkbox-label">
+                    <input
+                      type="checkbox"
+                      checked={selectedDays.includes(day)}
+                      onChange={() => toggleDay(day)}
+                    />
+                    {day}
+                  </label>
+                ))}
+              </div>
+              <small className="form-text">
+                Select days when the program should run within the date range.
+              </small>
+            </div>
+          )}
+          <div className="form-group">
+            <label>Output:</label>
+            <div className="output-toggle">
+              <span className="output-option">A</span>
+              <label className="toggle-switch">
                 <input
                   type="checkbox"
-                  checked={selectedDays.includes(day)}
-                  onChange={() => toggleDay(day)}
+                  checked={output === 'B'}
+                  onChange={(e) => setOutput(e.target.checked ? 'B' : 'A')}
                 />
-                {day}
+                <span className="toggle-slider output-slider"></span>
               </label>
-            ))}
+              <span className="output-option">B</span>
+            </div>
           </div>
-          <small className="form-text">
-            Select days when the program should run within the date range.
-          </small>
-        </div>
+        </>
       )}
-      <div className="form-group">
-        <label>Output:</label>
-        <div className="output-toggle">
-          <span className="output-option">A</span>
-          <label className="toggle-switch">
-            <input
-              type="checkbox"
-              checked={output === 'B'}
-              onChange={(e) => setOutput(e.target.checked ? 'B' : 'A')}
-            />
-            <span className="toggle-slider output-slider"></span>
-          </label>
-          <span className="output-option">B</span>
-        </div>
-      </div>
       <div className="form-group">
         <label htmlFor="trigger">Trigger:</label>
         <select
@@ -534,12 +572,15 @@ function ProgramEditor({ wsRef, isWsReady, programs }) {
           onChange={(e) => setTrigger(e.target.value)}
           className="input-field"
         >
-          <option value="Manual">Manual</option>
-          <option value="Cycle Timer">Cycle Timer</option>
+          {triggerOptions.map((option) => (
+            <option key={option.value} value={option.value}>
+              {option.label}
+            </option>
+          ))}
         </select>
       </div>
       <div className="trigger-content">
-        {trigger === 'Cycle Timer' ? (
+        {trigger === 'Cycle Timer' && !isMonitorOnly ? (
           <div className="time-fields">
             <div className="form-group">
               <label>Run Time:</label>
@@ -632,8 +673,10 @@ function ProgramEditor({ wsRef, isWsReady, programs }) {
               </small>
             </div>
           </div>
-        ) : (
+        ) : trigger === 'Manual' && !isMonitorOnly ? (
           <div className="manual-message">Manually powered on</div>
+        ) : (
+          <div className="manual-message">Monitoring {trigger}</div>
         )}
       </div>
       <div className="button-group">
@@ -649,40 +692,46 @@ function ProgramEditor({ wsRef, isWsReady, programs }) {
 }
 
 ProgramEditor.propTypes = {
-    wsRef: PropTypes.shape({
-      current: PropTypes.instanceOf(WebSocket),
-    }).isRequired,
-    isWsReady: PropTypes.bool.isRequired,
-    programs: PropTypes.arrayOf(
-      PropTypes.shape({
-        id: PropTypes.string.isRequired,
-        name: PropTypes.string,
-        enabled: PropTypes.bool,
-        output: PropTypes.string,
-        startDate: PropTypes.string,
-        startDateEnabled: PropTypes.bool,
-        endDate: PropTypes.string,
-        endDateEnabled: PropTypes.bool,
-        startTime: PropTypes.string,
-        startTimeEnabled: PropTypes.bool,
-        endTime: PropTypes.string,
-        endTimeEnabled: PropTypes.bool,
-        selectedDays: PropTypes.arrayOf(PropTypes.string),
-        daysPerWeekEnabled: PropTypes.bool,
-        trigger: PropTypes.string,
-        runTime: PropTypes.shape({
-          seconds: PropTypes.oneOfType([PropTypes.number, PropTypes.string]),
-          minutes: PropTypes.oneOfType([PropTypes.number, PropTypes.string]),
-          hours: PropTypes.oneOfType([PropTypes.number, PropTypes.string]),
-        }),
-        stopTime: PropTypes.shape({
-          seconds: PropTypes.oneOfType([PropTypes.number, PropTypes.string]),
-          minutes: PropTypes.oneOfType([PropTypes.number, PropTypes.string]),
-          hours: PropTypes.oneOfType([PropTypes.number, PropTypes.string]),
-        }),
-        startHigh: PropTypes.bool,
-      })
-    ).isRequired,
-  };
-  
+  wsRef: PropTypes.shape({
+    current: PropTypes.instanceOf(WebSocket),
+  }).isRequired,
+  isWsReady: PropTypes.bool.isRequired,
+  programs: PropTypes.arrayOf(
+    PropTypes.shape({
+      id: PropTypes.string.isRequired,
+      name: PropTypes.string,
+      enabled: PropTypes.bool,
+      output: PropTypes.string,
+      startDate: PropTypes.string,
+      startDateEnabled: PropTypes.bool,
+      endDate: PropTypes.string,
+      endDateEnabled: PropTypes.bool,
+      startTime: PropTypes.string,
+      startTimeEnabled: PropTypes.bool,
+      endTime: PropTypes.string,
+      endTimeEnabled: PropTypes.bool,
+      selectedDays: PropTypes.arrayOf(PropTypes.string),
+      daysPerWeekEnabled: PropTypes.bool,
+      trigger: PropTypes.string,
+      runTime: PropTypes.shape({
+        seconds: PropTypes.oneOfType([PropTypes.number, PropTypes.string]),
+        minutes: PropTypes.oneOfType([PropTypes.number, PropTypes.string]),
+        hours: PropTypes.oneOfType([PropTypes.number, PropTypes.string]),
+      }),
+      stopTime: PropTypes.shape({
+        seconds: PropTypes.oneOfType([PropTypes.number, PropTypes.string]),
+        minutes: PropTypes.oneOfType([PropTypes.number, PropTypes.string]),
+        hours: PropTypes.oneOfType([PropTypes.number, PropTypes.string]),
+      }),
+      startHigh: PropTypes.bool,
+    })
+  ).isRequired,
+  sensors: PropTypes.arrayOf(
+    PropTypes.shape({
+      id: PropTypes.string.isRequired,
+      name: PropTypes.string.isRequired,
+    })
+  ).isRequired,
+};
+
 export default ProgramEditor;
