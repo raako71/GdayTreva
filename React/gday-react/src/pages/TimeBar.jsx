@@ -1,7 +1,9 @@
 import '../styles.css';
 import { Link } from 'react-router-dom';
 import { useState, useRef } from 'react';
+import PropTypes from 'prop-types';
 
+// Format time with ESP32's offset
 function TimeBar({ message, wsRef }) {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [isOverlayOpen, setIsOverlayOpen] = useState(false);
@@ -21,7 +23,9 @@ function TimeBar({ message, wsRef }) {
       console.warn('Invalid date calculated:', { epoch, offsetMinutes, adjustedEpochMs });
       return 'Invalid time';
     }
-    const day = String(date.getUTCDate()).padStart(2, '0');
+    const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+    const day = dayNames[date.getUTCDay()];
+    const dateStr = String(date.getUTCDate()).padStart(2, '0');
     const month = String(date.getUTCMonth() + 1).padStart(2, '0');
     const year = date.getUTCFullYear();
     const hours = String(date.getUTCHours()).padStart(2, '0');
@@ -33,7 +37,7 @@ function TimeBar({ message, wsRef }) {
     const offsetSign = offsetMinutes >= 0 ? '+' : '-';
     const offsetStr = `${offsetSign}${String(offsetHours).padStart(2, '0')}:${String(offsetMins).padStart(2, '0')}`;
 
-    return `${day}/${month}/${year}, ${hours}:${minutes}:${seconds} (${offsetStr})`;
+    return `${day} ${dateStr}/${month}/${year}, ${hours}:${minutes}:${seconds} (${offsetStr})`;
   };
 
   // Format offset for overlay
@@ -122,7 +126,7 @@ function TimeBar({ message, wsRef }) {
         onClick={toggleOverlay}
         aria-label="Adjust time offset"
       >
-        Time:{' '}
+        Device time:{' '}
         <span className={isOffsetMismatch ? 'offset-mismatch' : ''}>
           {formatTime(message?.epoch, message?.offset_minutes)}
         </span>
@@ -240,5 +244,17 @@ function TimeBar({ message, wsRef }) {
     </div>
   );
 }
+
+TimeBar.propTypes = {
+  message: PropTypes.shape({
+    epoch: PropTypes.number,
+    offset_minutes: PropTypes.number,
+    mem_total: PropTypes.number,
+    mem_used: PropTypes.number,
+  }),
+  wsRef: PropTypes.shape({
+    current: PropTypes.instanceOf(WebSocket),
+  }),
+};
 
 export default TimeBar;
