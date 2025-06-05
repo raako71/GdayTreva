@@ -30,3 +30,4 @@ R0.27: pull programs from App.jsx
 R0.28: null output placeholder.
 R0.29: update programs on program save.
 R0.30: include day in timebar.
+R0.31: show uptime.

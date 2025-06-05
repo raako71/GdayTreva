@@ -12,7 +12,6 @@ function App() {
   const [message, setMessage] = useState({ epoch: 0, offset_minutes: 0, mem_used: 0, mem_total: 0 });
   const [networkInfo, setNetworkInfo] = useState(null);
   const [connectionStatus, setConnectionStatus] = useState('Attempting to connect...');
-  const [lastError, setLastError] = useState(null);
   const [isWsReady, setIsWsReady] = useState(false);
   const wsRef = useRef(null);
   const [wsServer, setWsServer] = useState(null);
@@ -89,7 +88,6 @@ function App() {
         if (isMounted) {
           console.log('WebSocket connection opened');
           setConnectionStatus('Connected');
-          setLastError(null);
           setIsWsReady(true);
           retryDelay = 1000;
           requestPrograms();
@@ -165,7 +163,6 @@ function App() {
         if (isMounted) {
           console.error('WebSocket error:', error);
           setConnectionStatus('Connection failed - verify gday.local');
-          setLastError('Connection failed - verify gday.local');
           setIsWsReady(false);
           ws.close();
         }

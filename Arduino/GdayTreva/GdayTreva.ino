@@ -471,6 +471,7 @@ void sendTimeToClients() {
     doc["mem_used"] = usedHeap;
     doc["mem_total"] = totalHeap;
     doc["offset_minutes"] = config.time_offset_minutes;
+    doc["millis"] = millis();
     String json;
     serializeJson(doc, json);
     ws.textAll(json);

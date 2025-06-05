@@ -3,7 +3,6 @@ import { Link } from 'react-router-dom';
 import { useState, useRef } from 'react';
 import PropTypes from 'prop-types';
 
-// Format time with ESP32's offset
 function TimeBar({ message, wsRef }) {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [isOverlayOpen, setIsOverlayOpen] = useState(false);
@@ -38,6 +37,26 @@ function TimeBar({ message, wsRef }) {
     const offsetStr = `${offsetSign}${String(offsetHours).padStart(2, '0')}:${String(offsetMins).padStart(2, '0')}`;
 
     return `${day} ${dateStr}/${month}/${year}, ${hours}:${minutes}:${seconds} (${offsetStr})`;
+  };
+
+  // Format uptime from milliseconds
+  const formatUptime = (millis) => {
+    if (millis == null || isNaN(millis) || millis < 0) {
+      return 'N/A';
+    }
+    const totalSeconds = Math.floor(millis / 1000);
+    const days = Math.floor(totalSeconds / (24 * 3600));
+    const hours = Math.floor((totalSeconds % (24 * 3600)) / 3600);
+    const minutes = Math.floor((totalSeconds % 3600) / 60);
+    const seconds = totalSeconds % 60;
+
+    const parts = [];
+    if (days > 0) parts.push(`${days}d`);
+    if (hours > 0 || parts.length > 0) parts.push(`${hours}h`);
+    if (minutes > 0 || parts.length > 0) parts.push(`${minutes}m`);
+    parts.push(`${seconds}s`); // Always include seconds, even if 0
+
+    return parts.join(' ');
   };
 
   // Format offset for overlay
@@ -133,6 +152,8 @@ function TimeBar({ message, wsRef }) {
       </button>
       <div>-</div>
       <div>Memory Free: {memPercent}%</div>
+      <div>-</div>
+      <div>Uptime: {formatUptime(message?.millis)}</div>
       <button
         ref={buttonRef}
         className="hamburger"
@@ -251,6 +272,7 @@ TimeBar.propTypes = {
     offset_minutes: PropTypes.number,
     mem_total: PropTypes.number,
     mem_used: PropTypes.number,
+    millis: PropTypes.number,
   }),
   wsRef: PropTypes.shape({
     current: PropTypes.instanceOf(WebSocket),
