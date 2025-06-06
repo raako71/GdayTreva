@@ -134,21 +134,27 @@ void scanI2CSensors() {
       String sensorType = "Unknown";
       bool isSensor = false;
 
-      // Check ACS71020 (uses same address range as MCP9600, so we need to identify specifically)
+      // Check ACS71020
       for (uint8_t addr : ACS71020_ADDRESSES) {
         if (address == addr) {
-          // Attempt to read ACS71020 Device ID (Register 0x01, expect 0x40 or similar)
+          // Attempt to read ACS71020 Device ID (Register 0x01)
           Wire.beginTransmission(address);
           Wire.write(0x01); // Device ID register
-          Wire.endTransmission();
-          Wire.requestFrom(address, (uint8_t)1);
-          if (Wire.available()) {
-            uint8_t deviceID = Wire.read();
-            if (deviceID == 0x40 || deviceID == 0x41) { // Adjust based on actual ACS71020 Device ID
-              sensorType = "ACS71020";
-              isSensor = true;
-              break;
+          if (Wire.endTransmission() == 0) {
+            Wire.requestFrom(address, (uint8_t)1);
+            if (Wire.available()) {
+              uint8_t deviceID = Wire.read();
+              Serial.printf("Device at 0x%02X responded with Device ID: 0x%02X\n", address, deviceID);
+              if (deviceID == 0x0A) { // ACS71020 Device ID
+                sensorType = "ACS71020";
+                isSensor = true;
+                break;
+              }
+            } else {
+              Serial.printf("Device at 0x%02X failed to provide Device ID\n", address);
             }
+          } else {
+            Serial.printf("Failed to access Device ID register at 0x%02X\n", address);
           }
         }
       }
@@ -193,18 +199,24 @@ void scanI2CSensors() {
       if (sensorType == "Unknown") {
         for (uint8_t addr : MCP9600_ADDRESSES) {
           if (address == addr) {
-            // Attempt to read MCP9600 Device ID (Register 0x40, expect 0x40 or similar)
+            // Attempt to read MCP9600 Device ID (Register 0x40)
             Wire.beginTransmission(address);
             Wire.write(0x40); // Device ID register
-            Wire.endTransmission();
-            Wire.requestFrom(address, (uint8_t)1);
-            if (Wire.available()) {
-              uint8_t deviceID = Wire.read();
-              if (deviceID >= 0x40 && deviceID <= 0x44) { // Adjust based on actual MCP9600 Device ID
-                sensorType = "MCP9600";
-                isSensor = true;
-                break;
+            if (Wire.endTransmission() == 0) {
+              Wire.requestFrom(address, (uint8_t)1);
+              if (Wire.available()) {
+                uint8_t deviceID = Wire.read();
+                Serial.printf("Device at 0x%02X responded with Device ID: 0x%02X\n", address, deviceID);
+                if (deviceID >= 0x40 && deviceID <= 0x44) { // MCP9600 Device ID range
+                  sensorType = "MCP9600";
+                  isSensor = true;
+                  break;
+                }
+              } else {
+                Serial.printf("Device at 0x%02X failed to provide Device ID\n", address);
               }
+            } else {
+              Serial.printf("Failed to access Device ID register at 0x%02X\n", address);
             }
           }
         }
@@ -212,7 +224,7 @@ void scanI2CSensors() {
 
       if (isSensor) {
         detectedSensors.push_back({sensorType, address, true});
-        Serial.printf("Found %s at address 0x%02X\n", sensorType.c_str(), address);
+        Serial.printf("Identified %s at address 0x%02X\n", sensorType.c_str(), address);
       } else {
         Serial.printf("Unknown device at address 0x%02X\n", address);
       }
