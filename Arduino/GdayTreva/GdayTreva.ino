@@ -11,6 +11,7 @@
 #include <ElegantOTA.h>
 #include <map>     // For subscriber_epochs
 #include <vector>  // For null_program_ids and trigger_info
+#include <Wire.h>  // For I2C communication
 
 #define FORMAT_LITTLEFS_IF_FAILED true
 
@@ -18,12 +19,26 @@
 #define OUTPUT_A_PIN 4
 #define OUTPUT_B_PIN 12
 
+// I2C Pin definitions
+#define I2C_SDA 32
+#define I2C_SCL 33
+
 // OTA Credentials
 const char *OTA_USERNAME = "admin";
 const char *OTA_PASSWORD = "admin";
 
 // OTA Progress Tracking
 static unsigned long otaProgressMillis = 0;
+
+// Sensor structure to track detected sensors
+struct SensorInfo {
+  String type;      // Sensor type (e.g., "ACS71020", "BME280")
+  uint8_t address;  // I2C address
+  bool active;      // Whether sensor is detected
+};
+
+// Global sensor index
+std::vector<SensorInfo> detectedSensors;
 
 struct Config {
   char ssid[32];
@@ -50,7 +65,7 @@ struct ProgramConfig {
   int id = -1;                // Program ID (1-10, -1 if invalid)
   String output = "A";        // Output ("A", "B", or "Null")
   String trigger = "Manual";  // Trigger ("Manual", "Cycle Timer", etc.)
-  bool active = false;        // Whether the program is active (from isProgramActive)
+  bool active = false;        // Whether the program is active
 };
 ProgramConfig programConfigs[11];
 
@@ -100,6 +115,142 @@ struct TriggerInfo {
 };
 std::vector<TriggerInfo> last_trigger_info;
 
+// I2C Scanner function to detect sensors
+void scanI2CSensors() {
+  detectedSensors.clear();
+  Serial.println("Scanning I2C bus...");
+
+  // Possible I2C addresses for each sensor
+  const uint8_t ACS71020_ADDRESSES[] = {0x60, 0x61, 0x62, 0x63, 0x64, 0x65, 0x66, 0x67}; // ACS71020 possible addresses
+  const uint8_t BME280_ADDRESSES[] = {0x76, 0x77};
+  const uint8_t VEML6030_ADDRESSES[] = {0x10, 0x48};
+  const uint8_t SHT3X_ADDRESSES[] = {0x44, 0x45};
+  const uint8_t HDC2080_ADDRESSES[] = {0x40, 0x41};
+  const uint8_t MCP9600_ADDRESSES[] = {0x60, 0x61, 0x62, 0x63, 0x64, 0x65, 0x66, 0x67};
+
+  for (uint8_t address = 0x08; address <= 0x77; address++) {
+    Wire.beginTransmission(address);
+    if (Wire.endTransmission() == 0) { // Device responded
+      String sensorType = "Unknown";
+      bool isSensor = false;
+
+      // Check ACS71020 (uses same address range as MCP9600, so we need to identify specifically)
+      for (uint8_t addr : ACS71020_ADDRESSES) {
+        if (address == addr) {
+          // Attempt to read ACS71020 Device ID (Register 0x01, expect 0x40 or similar)
+          Wire.beginTransmission(address);
+          Wire.write(0x01); // Device ID register
+          Wire.endTransmission();
+          Wire.requestFrom(address, (uint8_t)1);
+          if (Wire.available()) {
+            uint8_t deviceID = Wire.read();
+            if (deviceID == 0x40 || deviceID == 0x41) { // Adjust based on actual ACS71020 Device ID
+              sensorType = "ACS71020";
+              isSensor = true;
+              break;
+            }
+          }
+        }
+      }
+
+      // Check BME280
+      for (uint8_t addr : BME280_ADDRESSES) {
+        if (address == addr) {
+          sensorType = "BME280";
+          isSensor = true;
+          break;
+        }
+      }
+
+      // Check VEML6030
+      for (uint8_t addr : VEML6030_ADDRESSES) {
+        if (address == addr) {
+          sensorType = "VEML6030";
+          isSensor = true;
+          break;
+        }
+      }
+
+      // Check SHT3x-DIS
+      for (uint8_t addr : SHT3X_ADDRESSES) {
+        if (address == addr) {
+          sensorType = "SHT3x-DIS";
+          isSensor = true;
+          break;
+        }
+      }
+
+      // Check HDC2080
+      for (uint8_t addr : HDC2080_ADDRESSES) {
+        if (address == addr) {
+          sensorType = "HDC2080";
+          isSensor = true;
+          break;
+        }
+      }
+
+      // Check MCP9600 (if not already identified as ACS71020)
+      if (sensorType == "Unknown") {
+        for (uint8_t addr : MCP9600_ADDRESSES) {
+          if (address == addr) {
+            // Attempt to read MCP9600 Device ID (Register 0x40, expect 0x40 or similar)
+            Wire.beginTransmission(address);
+            Wire.write(0x40); // Device ID register
+            Wire.endTransmission();
+            Wire.requestFrom(address, (uint8_t)1);
+            if (Wire.available()) {
+              uint8_t deviceID = Wire.read();
+              if (deviceID >= 0x40 && deviceID <= 0x44) { // Adjust based on actual MCP9600 Device ID
+                sensorType = "MCP9600";
+                isSensor = true;
+                break;
+              }
+            }
+          }
+        }
+      }
+
+      if (isSensor) {
+        detectedSensors.push_back({sensorType, address, true});
+        Serial.printf("Found %s at address 0x%02X\n", sensorType.c_str(), address);
+      } else {
+        Serial.printf("Unknown device at address 0x%02X\n", address);
+      }
+    }
+  }
+
+  Serial.printf("I2C scan complete. Found %d sensors.\n", detectedSensors.size());
+}
+
+// Sends sensor status to subscribed clients
+void sendSensorStatus() {
+  if (subscriber_epochs.empty()) return;
+
+  uint32_t new_epoch = millis();
+  StaticJsonDocument<512> doc;
+  doc["type"] = "sensor_status";
+  doc["epoch"] = new_epoch;
+
+  JsonArray sensors = doc.createNestedArray("sensors");
+  for (const auto &sensor : detectedSensors) {
+    JsonObject sensorObj = sensors.createNestedObject();
+    sensorObj["type"] = sensor.type;
+    sensorObj["address"] = String(sensor.address, HEX);
+    sensorObj["active"] = sensor.active;
+  }
+
+  String json;
+  serializeJson(doc, json);
+
+  for (auto &pair : subscriber_epochs) {
+    if (new_epoch > pair.second) {
+      pair.first->text(json);
+      pair.second = new_epoch;
+      Serial.printf("Sent sensor_status to client #%u\n", pair.first->id());
+    }
+  }
+}
+
 // Sends output status to subscribed clients
 void sendOutputStatus(const std::vector<int> &null_program_ids) {
   if (subscriber_epochs.empty()) return;
@@ -147,7 +298,7 @@ void sendTriggerStatus(const std::vector<TriggerInfo> &trigger_info) {
     prog["output"] = info.output;
     prog["trigger"] = info.trigger;
     if (info.output == "A" || info.output == "B") {
-      prog["state"] = info.state;  // Add state for A/B outputs
+      prog["state"] = info.state;
     }
     if ((info.trigger == "Cycle Timer") && info.next_toggle > 0) {
       prog["next_toggle"] = info.next_toggle;
@@ -259,6 +410,7 @@ void onWsEvent(AsyncWebSocket *server, AsyncWebSocketClient *client, AwsEventTyp
       }
       subscriber_epochs[client] = 0;
       sendTriggerStatus(last_trigger_info);
+      sendSensorStatus();
       break;
     case WS_EVT_DISCONNECT:
       Serial.printf("WebSocket client #%u disconnected\n", client->id());
@@ -275,11 +427,15 @@ void onWsEvent(AsyncWebSocket *server, AsyncWebSocketClient *client, AwsEventTyp
             subscriber_epochs[client] = 0;
             Serial.printf("Client #%u subscribed to status\n", client->id());
             sendTriggerStatus(last_trigger_info);
+            sendSensorStatus();
           } else if (command && strcmp(command, "unsubscribe_output_status") == 0) {
             subscriber_epochs.erase(client);
             Serial.printf("Client #%u unsubscribed from status\n", client->id());
           } else if (command && (strcmp(command, "get_output_status") == 0 || strcmp(command, "get_trigger_status") == 0)) {
             sendTriggerStatus(last_trigger_info);
+          } else if (command && strcmp(command, "get_sensor_status") == 0) {
+            scanI2CSensors();
+            sendSensorStatus();
           } else if (command && strcmp(command, "sync_time") == 0) {
             const char *timeStr = doc["time"].as<const char *>();
             if (timeStr) {
@@ -803,7 +959,6 @@ std::pair<bool, time_t> runCycleTimer(const char *output, CycleState &state, con
   time_t next_toggle = 0;
   unsigned long now = millis();
   time_t epoch_now = time(nullptr);
-  //time_t epoch_now = getAdjustedTime();
 
   if (!state.isRunning) {
     state.isRunning = true;
@@ -823,11 +978,9 @@ std::pair<bool, time_t> runCycleTimer(const char *output, CycleState &state, con
     return { state.isOnPhase, state.nextToggle };
   }
 
-  // Calculate next toggle time based on the last switch time
   unsigned long time_since_last_switch_ms = now - state.lastSwitchTime;
   unsigned long remaining_ms = cycle_duration_ms - time_since_last_switch_ms;
-  // Use ceiling to avoid truncation issues
-  next_toggle = epoch_now + (remaining_ms + 999) / 1000;  // Round up to next second
+  next_toggle = epoch_now + (remaining_ms + 999) / 1000;
   return { state.isOnPhase, state.nextToggle };
 }
 
@@ -845,7 +998,7 @@ void updateOutputs() {
     null_program_ids.clear();
     cycleConfigA = cycleConfigB = { 0, 0, false, false };
     for (int i = 1; i <= numPrograms; i++) {
-      programConfigs[i] = { -1, "A", "Manual", false };  // Reset
+      programConfigs[i] = { -1, "A", "Manual", false };
       String filename = "/program" + String(i < 10 ? "0" + String(i) : String(i)) + ".json";
       if (!LittleFS.exists(filename)) continue;
       File file = LittleFS.open(filename, FILE_READ);
@@ -886,7 +1039,7 @@ void updateOutputs() {
   auto addTriggerInfo = [&](int programId, bool state = false, time_t next_toggle = 0) {
     if (programId == -1 || programId < 1 || programId > numPrograms) return;
     ProgramConfig &cfg = programConfigs[programId];
-    if (cfg.id == -1) return;  // Inactive program
+    if (cfg.id == -1) return;
     TriggerInfo info = { programId, cfg.output, cfg.trigger, next_toggle, "", state };
     if (cfg.output == "Null" && cfg.trigger != "Manual" && cfg.trigger != "Cycle Timer") {
       info.sensor_value = "0";
@@ -901,11 +1054,11 @@ void updateOutputs() {
       cycleStateA = { false, 0, false, activeProgramA };
       trigger_changed = true;
     }
-    if (cycleConfigA.valid) {  // Cycle Timer
+    if (cycleConfigA.valid) {
       auto [state, next_toggle] = runCycleTimer("Output A", cycleStateA, cycleConfigA);
       outputAState = state;
       addTriggerInfo(activeProgramA, state, next_toggle);
-    } else {  // Manual
+    } else {
       outputAState = true;
       addTriggerInfo(activeProgramA, true);
     }
@@ -927,11 +1080,11 @@ void updateOutputs() {
       cycleStateB = { false, 0, false, activeProgramB };
       trigger_changed = true;
     }
-    if (cycleConfigB.valid) {  // Cycle Timer
+    if (cycleConfigB.valid) {
       auto [state, next_toggle] = runCycleTimer("Output B", cycleStateB, cycleConfigB);
       outputBState = state;
       addTriggerInfo(activeProgramB, state, next_toggle);
-    } else {  // Manual
+    } else {
       outputBState = true;
       addTriggerInfo(activeProgramB, true);
     }
@@ -957,6 +1110,14 @@ void setup() {
   Serial.println("\nboot");
   totalHeap = ESP.getHeapSize();
   Serial.println("Total heap size: " + String(totalHeap) + " bytes");
+
+  // Initialize I2C
+  Wire.begin(I2C_SDA, I2C_SCL);
+  Serial.println("I2C initialized on SDA: " + String(I2C_SDA) + ", SCL: " + String(I2C_SCL));
+
+  // Perform initial I2C scan
+  scanI2CSensors();
+
   WiFi.onEvent(networkEvent);
   if (!LittleFS.begin(FORMAT_LITTLEFS_IF_FAILED)) {
     Serial.println("LittleFS Mount Failed");
@@ -965,7 +1126,6 @@ void setup() {
   readSettings();
   pinMode(5, OUTPUT);
   digitalWrite(5, HIGH);
-  // Initialize output pins
   pinMode(OUTPUT_A_PIN, OUTPUT);
   pinMode(OUTPUT_B_PIN, OUTPUT);
   digitalWrite(OUTPUT_A_PIN, LOW);
@@ -1029,6 +1189,7 @@ bool isTimeSynced() {
 
 void loop() {
   static unsigned long lastWiFiRetry = 0;
+  static unsigned long lastI2CScan = 0;
   if (!wifi_connected && !eth_connected && millis() - lastWiFiRetry >= 30000) {
     WIFI_Connect();
     lastWiFiRetry = millis();
@@ -1058,6 +1219,11 @@ void loop() {
   }
   if (shouldCheckInternet() == 1) {
     checkInternetConnectivity();
+  }
+  if (millis() - lastI2CScan >= 60000) { // Scan every 60 seconds
+    scanI2CSensors();
+    sendSensorStatus();
+    lastI2CScan = millis();
   }
   static unsigned long lastTimeSend = 0;
   if (millis() - lastTimeSend > 999) {
