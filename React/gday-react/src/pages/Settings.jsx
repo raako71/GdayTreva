@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import PropTypes from 'prop-types';
 import '../styles.css';
 
-function Settings({ requestNetworkInfo, networkInfo, connectionStatus }) {
+function Settings({ requestNetworkInfo, networkInfo, connectionStatus, sensors }) {
   const [isWaitingForData, setIsWaitingForData] = useState(false);
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [hasRequested, setHasRequested] = useState(false);
@@ -73,6 +73,20 @@ function Settings({ requestNetworkInfo, networkInfo, connectionStatus }) {
             <div>Loading network info...</div>
           )}
         </div>
+        <div className="Tile">
+          <h2>Discovered Sensors</h2>
+          {sensors.length > 0 ? (
+            <ul>
+              {sensors.map((sensor, index) => (
+                <li key={`${sensor.type}_${sensor.address}_${index}`}>
+                  {sensor.type} 0x{sensor.address} ({sensor.active ? 'Active' : 'Inactive'})
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <div>No sensors detected</div>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -95,6 +109,13 @@ Settings.propTypes = {
     eth_dns: PropTypes.string,
     mdns_hostname: PropTypes.string,
   }),
+  sensors: PropTypes.arrayOf(
+    PropTypes.shape({
+      type: PropTypes.string.isRequired,
+      address: PropTypes.string.isRequired,
+      active: PropTypes.bool.isRequired,
+    })
+  ).isRequired,
 };
 
 export default Settings;

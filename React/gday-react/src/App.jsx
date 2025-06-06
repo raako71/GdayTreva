@@ -17,13 +17,7 @@ function App() {
   const [wsServer, setWsServer] = useState(null);
   const [triggerStatus, setTriggerStatus] = useState(null);
   const [programs, setPrograms] = useState([]);
-
-  // Dummy sensor data
-  const sensors = [
-    { id: 'temp1', name: 'Temperature XX' },
-    { id: 'humid1', name: 'Humidity XX' },
-    { id: 'volt1', name: 'Voltage XX' },
-  ];
+  const [sensors, setSensors] = useState([]); // New state for sensors
 
   const requestNetworkInfo = useCallback(() => {
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
@@ -91,6 +85,7 @@ function App() {
           setIsWsReady(true);
           retryDelay = 1000;
           requestPrograms();
+          wsRef.current.send(JSON.stringify({ command: 'get_sensor_status' })); // Request sensor status on connect
         }
       };
 
@@ -135,8 +130,14 @@ function App() {
                 setMessage((prev) => ({ ...prev, offset_minutes: data.offset_minutes }));
                 break;
               case 'trigger_status':
-                //console.log('Received trigger_status:', data);
                 setTriggerStatus(data);
+                break;
+              case 'sensor_status':
+                setSensors(data.sensors || []);
+
+                console.log('Received sensor_status:', data);
+                // active status is redundant, should be removed from source.
+                
                 break;
               default:
                 console.warn('Unknown message type:', data.type);
@@ -184,10 +185,9 @@ function App() {
       <Routes>
         <Route path="/" element={<Home message={message} wsRef={wsRef} isWsReady={isWsReady} triggerStatus={triggerStatus} programs={programs} />} />
         <Route path="/graph" element={<Graph />} />
-        <Route path="/settings" element={<Settings requestNetworkInfo={requestNetworkInfo} networkInfo={networkInfo} connectionStatus={connectionStatus} />} />
+        <Route path="/settings" element={<Settings requestNetworkInfo={requestNetworkInfo} networkInfo={networkInfo} connectionStatus={connectionStatus} sensors={sensors} />} />
         <Route path="/programs" element={<Programs wsRef={wsRef} isWsReady={isWsReady} triggerStatus={triggerStatus} programs={programs} />} />
-        <Route path="/programEditor" element={<ProgramEditor wsRef={wsRef} isWsReady={isWsReady} programs={programs} sensors={sensors}/>}
-/>
+        <Route path="/programEditor" element={<ProgramEditor wsRef={wsRef} isWsReady={isWsReady} programs={programs} sensors={sensors} />} />
       </Routes>
     </div>
   );

@@ -7,7 +7,7 @@ function ProgramEditor({ wsRef, isWsReady, programs, sensors }) {
   const [programID, setProgramID] = useState('00');
   const [name, setName] = useState('');
   const [enabled, setEnabled] = useState(false);
-  const [isMonitorOnly, setIsMonitorOnly] = useState(false); // New state for Monitor only
+  const [isMonitorOnly, setIsMonitorOnly] = useState(false);
   const [output, setOutput] = useState('A');
   const [startDate, setStartDate] = useState('');
   const [startDateEnabled, setStartDateEnabled] = useState(true);
@@ -45,8 +45,8 @@ function ProgramEditor({ wsRef, isWsReady, programs, sensors }) {
     { value: 'Cycle Timer', label: 'Cycle Timer' },
   ];
   const sensorTriggers = sensors.map((sensor) => ({
-    value: sensor.id,
-    label: sensor.name,
+    value: `${sensor.type}_0x${sensor.address}`, // Unique ID, e.g., "ACS71020_0x61"
+    label: `${sensor.type} 0x${sensor.address}`, // Display name, e.g., "ACS71020 0x61"
   }));
   const triggerOptions = isMonitorOnly
     ? sensorTriggers
@@ -389,7 +389,7 @@ function ProgramEditor({ wsRef, isWsReady, programs, sensors }) {
         </label>
       </div>
       <div className="form-group">
-        <label>Monitor only (no output):</label>
+        <label>Monitor Only (No Output):</label>
         <label className="toggle-switch">
           <input
             type="checkbox"
@@ -728,8 +728,9 @@ ProgramEditor.propTypes = {
   ).isRequired,
   sensors: PropTypes.arrayOf(
     PropTypes.shape({
-      id: PropTypes.string.isRequired,
-      name: PropTypes.string.isRequired,
+      type: PropTypes.string.isRequired,
+      address: PropTypes.string.isRequired,
+      active: PropTypes.bool.isRequired,
     })
   ).isRequired,
 };
