@@ -31,3 +31,4 @@
  - 0.1.2.2: TriggerInfo refined.
  - 0.1.3: improved output control and WS message efficiency.
  - 0.1.4: pass millis().
+ - 0.2: read sensors.
