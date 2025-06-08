@@ -65,6 +65,7 @@ function Settings({ requestNetworkInfo, networkInfo, connectionStatus, sensors }
                   <div>ETH Gateway: {networkInfo.eth_gateway || 'N/A'}</div>
                   <div>ETH Subnet: {networkInfo.eth_subnet || 'N/A'}</div>
                   <div>ETH DNS: {networkInfo.eth_dns || 'N/A'}</div>
+                  <div>ETH DNS2: {networkInfo.eth_dns_2 || 'N/A'}</div>
                   <div>mDNS Hostname: {networkInfo.mdns_hostname || 'N/A'}</div>
                 </>
               )}
@@ -107,6 +108,7 @@ Settings.propTypes = {
     eth_gateway: PropTypes.string,
     eth_subnet: PropTypes.string,
     eth_dns: PropTypes.string,
+    eth_dns_2: PropTypes.string,
     mdns_hostname: PropTypes.string,
   }),
   sensors: PropTypes.arrayOf(

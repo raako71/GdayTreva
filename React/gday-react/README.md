@@ -32,3 +32,4 @@ R0.29: update programs on program save.
 R0.30: include day in timebar.
 R0.31: show uptime.
 R0.32: show sensors.
+R0.33: ETH DNS2.

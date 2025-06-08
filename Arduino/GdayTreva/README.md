@@ -32,3 +32,4 @@
  - 0.1.3: improved output control and WS message efficiency.
  - 0.1.4: pass millis().
  - 0.2: read sensors.
+ - 0.2.1: Disable WiFi when ETH is connected (DNS resetting to 0.0.0.0).

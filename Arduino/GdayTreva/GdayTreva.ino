@@ -340,15 +340,14 @@ void networkEvent(arduino_event_id_t event) {
       break;
     case ARDUINO_EVENT_ETH_CONNECTED:
       Serial.println("ETH Connected");
+      eth_connected = true;
       break;
     case ARDUINO_EVENT_ETH_GOT_IP:
       Serial.println("ETH Got IP");
       Serial.println("Ethernet IP: " + ETH.localIP().toString());
       Serial.println("ETH DNS: " + ETH.dnsIP().toString());
-      eth_connected = true;
       network_up = true;
       checkInternetConnectivity();
-      syncNTPTime();
       if (!MDNS.begin(config.mdns_hostname)) {
         Serial.println("Error setting up mDNS for Ethernet: " + String(config.mdns_hostname));
       } else {
@@ -385,7 +384,6 @@ void networkEvent(arduino_event_id_t event) {
       wifi_connected = true;
       network_up = true;
       checkInternetConnectivity();
-      syncNTPTime();
       if (!MDNS.begin(config.mdns_hostname)) {
         Serial.println("Error setting up mDNS for WiFi: " + String(config.mdns_hostname));
       } else {
@@ -658,6 +656,7 @@ void sendNetworkInfo(AsyncWebSocketClient *client) {
   String eth_subnet = eth_connected ? ETH.subnetMask().toString() : "N/A";
   String wifi_dns_str = wifi_connected ? WiFi.dnsIP().toString() : "N/A";
   String eth_dns_str = eth_connected ? ETH.dnsIP().toString() : "N/A";
+  String eth_dns_2 = eth_connected ? ETH.dnsIP(1).toString() : "N/A";
   int32_t wifi_rssi = wifi_connected ? WiFi.RSSI() : 0;
   String hostname = String(config.mdns_hostname) + ".local";
 
@@ -673,6 +672,7 @@ void sendNetworkInfo(AsyncWebSocketClient *client) {
   doc["eth_subnet"] = eth_subnet;
   doc["wifi_dns"] = wifi_dns_str;
   doc["eth_dns"] = eth_dns_str;
+  if (eth_dns_2 != "N/A" && eth_dns_2 != "0.0.0.0") doc["eth_dns_2"] = eth_dns_2;
   doc["mdns_hostname"] = hostname;
   doc["wifi_rssi"] = wifi_rssi;
 
@@ -716,19 +716,8 @@ bool syncNTPTime() {
   static int attemptCount = 0;
   static unsigned long lastAttemptTime = 0;
 
-  // Exit if time is already synced
-  if (timeSynced) {
-    return true;
-  }
-
   // Exit if less than 5 seconds since last attempt
   if ((millis() - lastAttemptTime < retryInterval)) {
-    return false;
-  }
-
-  // Check WiFi connection
-  if (!network_up) {
-    Serial.println("WiFi not connected, cannot sync NTP");
     return false;
   }
 
@@ -763,10 +752,8 @@ bool syncNTPTime() {
     currentServerIndex = 0;
     return true;
   }
-
   attemptCount++;
   currentServerIndex = (currentServerIndex + 1) % numServers;
-
   return false;
 }
 
@@ -1154,7 +1141,7 @@ void setup() {
   if (!ETH.begin(ETH_PHY_LAN8720, 0, 23, 18, 5, ETH_CLOCK_GPIO17_OUT)) {
     Serial.println("Ethernet failed to start");
   }
-  WIFI_Connect();
+  if (!eth_connected) WIFI_Connect();
   server.serveStatic("/", LittleFS, "/").setDefaultFile("index.html");
 
   server.onNotFound([](AsyncWebServerRequest *request) {
@@ -1202,11 +1189,6 @@ void setup() {
   server.begin();
 }
 
-bool isTimeSynced() {
-  time_t now = time(nullptr);
-  return now > 946684800;
-}
-
 void loop() {
   static unsigned long lastWiFiRetry = 0;
   static unsigned long lastI2CScan = 0;
@@ -1215,13 +1197,9 @@ void loop() {
     lastWiFiRetry = millis();
   }
   static unsigned long lastNTPSyncCheck = 0;
-  if (millis() - lastNTPSyncCheck >= 30000 && network_up) {
-    if (!isTimeSynced()) {
-      Serial.println("NTP sync failed, retrying...");
-      syncNTPTime();
-    }
-    lastNTPSyncCheck = millis();
-  }
+
+  if (!timeSynced && network_up) syncNTPTime();
+
   if (millis() - print_time_count >= 10000) {
     time_t now = time(nullptr);
     char timeStr[50];
