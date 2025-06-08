@@ -103,11 +103,14 @@
 }
 
 a:link, a:visited {
-  color: #1893ff;
+  color: #00ff11;
+  cursor: pointer;
+  text-decoration: none;
 }
 
 a:hover {
   color: #fff;
+  text-decoration: underline;
 }
 
 a:active {
@@ -281,12 +284,8 @@ input:checked + .enabled-slider:before {
 }
 
 .time-display {
-  background: none;
-  border: none;
-  color: rgba(255, 255, 255, 0.87);
   cursor: pointer;
-  padding: 0;
-  font: inherit;
+  color: #00ff11;
 }
 
 .time-display:hover {
@@ -374,7 +373,15 @@ input:checked + .enabled-slider:before {
 
 .form-text {
   font-size: 0.8em;
-  color: #666;
+  color: #808080;
   margin-top: 4px;
   display: block;
+}
+
+.button-group {
+  margin: 20px 0 40px 0;
+}
+
+.basic-div{
+  margin: 15px;
 }

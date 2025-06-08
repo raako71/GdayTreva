@@ -140,8 +140,11 @@ function TimeBar({ message, wsRef }) {
 
   return (
     <div className="time-bar">
-      <button
-        className="time-display"
+      <Link to="/">
+        Home
+      </Link>
+       - 
+      <a className="time-display"
         onClick={toggleOverlay}
         aria-label="Adjust time offset"
       >
@@ -149,7 +152,7 @@ function TimeBar({ message, wsRef }) {
         <span className={isOffsetMismatch ? 'offset-mismatch' : ''}>
           {formatTime(message?.epoch, message?.offset_minutes)}
         </span>
-      </button>
+      </a>
       <div>-</div>
       <div>Memory Free: {memPercent}%</div>
       <div>-</div>
@@ -240,7 +243,7 @@ function TimeBar({ message, wsRef }) {
         <div className="overlay-backdrop" onClick={toggleOverlay}>
           <div className="overlay" onClick={(e) => e.stopPropagation()}>
             <h2 className="overlay-header">Time Offset Settings</h2>
-            <p>ESP32 Time Offset: {formatOffset(message?.offset_minutes)}</p>
+            <p className={isOffsetMismatch ? 'offset-mismatch' : ''}>ESP32 Time Offset: {formatOffset(message?.offset_minutes)}</p>
             <p>Local Browser Offset: {formatOffset(browserOffset)}</p>
             <p>Update ESP32 offset to local browser time?</p>
             {offsetError && <p className="overlay-error">{offsetError}</p>}

@@ -358,8 +358,10 @@ function ProgramEditor({ wsRef, isWsReady, programs, sensors }) {
   };
 
   return (
-    <div>
-      <h1 className="Title">Program Editor</h1>
+    <div className="basic-div">
+      <div className="Title">
+      <h1 >Program Editor</h1>
+      </div>
       <div className="Title">
         <button className="save-button" onClick={handleImport}>
           Import
