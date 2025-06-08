@@ -30,19 +30,12 @@ function Settings({ requestNetworkInfo, networkInfo, connectionStatus, sensors }
       <div className="Tile-container">
         <div className="Tile">
           <h2>Network Settings</h2>
-          <button
-            onClick={() => {
-              console.log('Manual refresh - requesting network info');
-              requestNetworkInfo();
-            }}
-          >
-            Refresh Network Info
-          </button>
+          
           {isWaitingForData && connectionStatus !== 'Connected' ? (
             <div>Waiting for WebSocket connection ({connectionStatus})</div>
           ) : networkInfo ? (
             <>
-              {networkInfo.wifi_ip !== 'N/A' && (
+              {networkInfo.wifi_ip && (
                 <>
                   <div>WiFi IP: {networkInfo.wifi_ip}</div>
                   <div>
@@ -51,28 +44,47 @@ function Settings({ requestNetworkInfo, networkInfo, connectionStatus, sensors }
                   </div>
                 </>
               )}
-              {networkInfo.eth_ip !== 'N/A' && <div>ETH IP: {networkInfo.eth_ip}</div>}
+              {networkInfo.eth_ip && <div>ETH IP: {networkInfo.eth_ip}</div>}
+              <div>mDNS Hostname: {networkInfo.mdns_hostname || 'N/A'}</div>
               <a href="#" onClick={() => setShowAdvanced(!showAdvanced)}>
                 {showAdvanced ? 'Hide Advanced' : 'Show Advanced'}
               </a>
               {showAdvanced && (
                 <>
-                  <div>WiFi MAC: {networkInfo.wifi_mac || 'N/A'}</div>
-                  <div>WiFi Gateway: {networkInfo.wifi_gateway || 'N/A'}</div>
-                  <div>WiFi Subnet: {networkInfo.wifi_subnet || 'N/A'}</div>
-                  <div>WiFi DNS: {networkInfo.wifi_dns || 'N/A'}</div>
-                  <div>ETH MAC: {networkInfo.eth_mac || 'N/A'}</div>
-                  <div>ETH Gateway: {networkInfo.eth_gateway || 'N/A'}</div>
-                  <div>ETH Subnet: {networkInfo.eth_subnet || 'N/A'}</div>
-                  <div>ETH DNS: {networkInfo.eth_dns || 'N/A'}</div>
-                  <div>ETH DNS2: {networkInfo.eth_dns_2 || 'N/A'}</div>
-                  <div>mDNS Hostname: {networkInfo.mdns_hostname || 'N/A'}</div>
+                <p>
+                  {networkInfo.wifi_ip && (
+                  <>
+                  WiFi Gateway: {networkInfo.wifi_gateway || 'N/A'}<br/>
+                  WiFi DNS: {networkInfo.wifi_dns || 'N/A'}<br/>
+                  WiFi DNS2: {networkInfo.wifi_dns_2 || 'N/A'}<br/>
+                  WiFi Subnet: {networkInfo.wifi_subnet || 'N/A'}<br/>
+                  WiFi MAC: {networkInfo.wifi_mac || 'N/A'}<br/>
+                  </>)}
+                  {networkInfo.eth_gateway && (
+                  <>
+                  ETH Gateway: {networkInfo.eth_gateway || 'N/A'}<br/>
+                  ETH DNS: {networkInfo.eth_dns || 'N/A'}<br/>
+                  ETH DNS2: {networkInfo.eth_dns_2 || 'N/A'}<br/>
+                  ETH Subnet: {networkInfo.eth_subnet || 'N/A'}<br/>
+                  ETH MAC: {networkInfo.eth_mac || 'N/A'}<br/>
+                  </>)}
+                   
+                  </p>
                 </>
               )}
             </>
           ) : (
             <div>Loading network info...</div>
           )}
+          {!showAdvanced && (<p></p>)}
+          <button
+            onClick={() => {
+              console.log('Manual refresh - requesting network info');
+              requestNetworkInfo();
+            }}
+          >
+            Refresh Network Info
+          </button>
         </div>
         <div className="Tile">
           <h2>Discovered Sensors</h2>
@@ -104,6 +116,7 @@ Settings.propTypes = {
     wifi_gateway: PropTypes.string,
     wifi_subnet: PropTypes.string,
     wifi_dns: PropTypes.string,
+    wifi_dns_2: PropTypes.string,
     eth_mac: PropTypes.string,
     eth_gateway: PropTypes.string,
     eth_subnet: PropTypes.string,

@@ -655,6 +655,7 @@ void sendNetworkInfo(AsyncWebSocketClient *client) {
   String wifi_subnet = wifi_connected ? WiFi.subnetMask().toString() : "N/A";
   String eth_subnet = eth_connected ? ETH.subnetMask().toString() : "N/A";
   String wifi_dns_str = wifi_connected ? WiFi.dnsIP().toString() : "N/A";
+  String wifi_dns_2 = wifi_connected ? WiFi.dnsIP(1).toString() : "N/A";
   String eth_dns_str = eth_connected ? ETH.dnsIP().toString() : "N/A";
   String eth_dns_2 = eth_connected ? ETH.dnsIP(1).toString() : "N/A";
   int32_t wifi_rssi = wifi_connected ? WiFi.RSSI() : 0;
@@ -662,20 +663,24 @@ void sendNetworkInfo(AsyncWebSocketClient *client) {
 
   StaticJsonDocument<512> doc;
   doc["type"] = "network_info";
-  doc["wifi_ip"] = wifi_ip;
-  doc["eth_ip"] = eth_ip;
-  doc["wifi_mac"] = wifi_mac;
-  doc["eth_mac"] = eth_mac;
-  doc["wifi_gateway"] = wifi_gateway;
-  doc["eth_gateway"] = eth_gateway;
-  doc["wifi_subnet"] = wifi_subnet;
-  doc["eth_subnet"] = eth_subnet;
-  doc["wifi_dns"] = wifi_dns_str;
-  doc["eth_dns"] = eth_dns_str;
-  if (eth_dns_2 != "N/A" && eth_dns_2 != "0.0.0.0") doc["eth_dns_2"] = eth_dns_2;
+  if(wifi_connected){
+    doc["wifi_rssi"] = wifi_rssi;
+    doc["wifi_ip"] = wifi_ip;
+    doc["wifi_gateway"] = wifi_gateway;
+    doc["wifi_mac"] = wifi_mac;
+    doc["wifi_subnet"] = wifi_subnet;
+    doc["wifi_dns"] = wifi_dns_str;
+    doc["wifi_dns_2"] =  wifi_dns_2;
+  }
+  if(eth_connected){
+    doc["eth_ip"] = eth_ip;
+    doc["eth_gateway"] = eth_gateway;
+    doc["eth_subnet"] = eth_subnet;
+    doc["eth_dns"] = eth_dns_str;
+    doc["eth_dns_2"] = eth_dns_2;
+    doc["eth_mac"] = eth_mac;
+  }
   doc["mdns_hostname"] = hostname;
-  doc["wifi_rssi"] = wifi_rssi;
-
   String json;
   serializeJson(doc, json);
   client->text(json);
@@ -1211,7 +1216,6 @@ void loop() {
       Serial.print(WiFi.localIP().toString());
     } else if (eth_connected) {
       Serial.print(" Ethernet IP: " + ETH.localIP().toString());
-      Serial.println(" ETH DNS: " + ETH.dnsIP().toString());
     }
     Serial.println(" Free heap: " + String(ESP.getFreeHeap()));
     print_time_count = millis();
@@ -1219,20 +1223,15 @@ void loop() {
   if (shouldCheckInternet() == 1) {
     checkInternetConnectivity();
   }
-  /*if (millis() - lastI2CScan >= 60000) { // Scan every 60 seconds
-    scanI2CSensors();
-    sendSensorStatus();
-    lastI2CScan = millis();
-  }*/
   static unsigned long lastTimeSend = 0;
-  if (millis() - lastTimeSend > 999) {
-    sendTimeToClients();
-    lastTimeSend = millis();
-  }
   static unsigned long lastOutputUpdate = 0;
   if (millis() - lastOutputUpdate > 100) {
     updateOutputs();
     lastOutputUpdate = millis();
+    if (millis() - lastTimeSend > 999) {
+      sendTimeToClients();
+      lastTimeSend = millis();
+    }
   }
   ElegantOTA.loop();
 }
