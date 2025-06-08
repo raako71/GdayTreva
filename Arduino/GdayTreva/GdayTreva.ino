@@ -121,16 +121,16 @@ void scanI2CSensors() {
   Serial.println("Scanning I2C bus...");
 
   // Possible I2C addresses for each sensor
-  const uint8_t ACS71020_ADDRESSES[] = {0x60, 0x61, 0x62, 0x63, 0x64, 0x65, 0x66, 0x67}; // ACS71020 possible addresses
-  const uint8_t BME280_ADDRESSES[] = {0x76, 0x77};
-  const uint8_t VEML6030_ADDRESSES[] = {0x10, 0x48};
-  const uint8_t SHT3X_ADDRESSES[] = {0x44, 0x45};
-  const uint8_t HDC2080_ADDRESSES[] = {0x40, 0x41};
-  const uint8_t MCP9600_ADDRESSES[] = {0x60, 0x61, 0x62, 0x63, 0x64, 0x65, 0x66, 0x67};
+  const uint8_t ACS71020_ADDRESSES[] = { 0x60, 0x61, 0x62, 0x63, 0x64, 0x65, 0x66, 0x67 };  // ACS71020 possible addresses
+  const uint8_t BME280_ADDRESSES[] = { 0x76, 0x77 };
+  const uint8_t VEML6030_ADDRESSES[] = { 0x10, 0x48 };
+  const uint8_t SHT3X_ADDRESSES[] = { 0x44, 0x45 };
+  const uint8_t HDC2080_ADDRESSES[] = { 0x40, 0x41 };
+  const uint8_t MCP9600_ADDRESSES[] = { 0x60, 0x61, 0x62, 0x63, 0x64, 0x65, 0x66, 0x67 };
 
   for (uint8_t address = 0x08; address <= 0x77; address++) {
     Wire.beginTransmission(address);
-    if (Wire.endTransmission() == 0) { // Device responded
+    if (Wire.endTransmission() == 0) {  // Device responded
       String sensorType = "Unknown";
       bool isSensor = false;
 
@@ -139,13 +139,13 @@ void scanI2CSensors() {
         if (address == addr) {
           // Attempt to read ACS71020 Device ID (Register 0x01)
           Wire.beginTransmission(address);
-          Wire.write(0x01); // Device ID register
+          Wire.write(0x01);  // Device ID register
           if (Wire.endTransmission() == 0) {
             Wire.requestFrom(address, (uint8_t)1);
             if (Wire.available()) {
               uint8_t deviceID = Wire.read();
               Serial.printf("Device at 0x%02X responded with Device ID: 0x%02X\n", address, deviceID);
-              if (deviceID == 0x0A) { // ACS71020 Device ID
+              if (deviceID == 0x0A) {  // ACS71020 Device ID
                 sensorType = "ACS71020";
                 isSensor = true;
                 break;
@@ -201,13 +201,13 @@ void scanI2CSensors() {
           if (address == addr) {
             // Attempt to read MCP9600 Device ID (Register 0x40)
             Wire.beginTransmission(address);
-            Wire.write(0x40); // Device ID register
+            Wire.write(0x40);  // Device ID register
             if (Wire.endTransmission() == 0) {
               Wire.requestFrom(address, (uint8_t)1);
               if (Wire.available()) {
                 uint8_t deviceID = Wire.read();
                 Serial.printf("Device at 0x%02X responded with Device ID: 0x%02X\n", address, deviceID);
-                if (deviceID >= 0x40 && deviceID <= 0x44) { // MCP9600 Device ID range
+                if (deviceID >= 0x40 && deviceID <= 0x44) {  // MCP9600 Device ID range
                   sensorType = "MCP9600";
                   isSensor = true;
                   break;
@@ -223,7 +223,7 @@ void scanI2CSensors() {
       }
 
       if (isSensor) {
-        detectedSensors.push_back({sensorType, address, true});
+        detectedSensors.push_back({ sensorType, address, true });
         Serial.printf("Identified %s at address 0x%02X\n", sensorType.c_str(), address);
       } else {
         Serial.printf("Unknown device at address 0x%02X\n", address);
@@ -656,10 +656,8 @@ void sendNetworkInfo(AsyncWebSocketClient *client) {
   String eth_gateway = eth_connected ? ETH.gatewayIP().toString() : "N/A";
   String wifi_subnet = wifi_connected ? WiFi.subnetMask().toString() : "N/A";
   String eth_subnet = eth_connected ? ETH.subnetMask().toString() : "N/A";
-  IPAddress wifi_dns = wifi_connected ? WiFi.dnsIP() : IPAddress(0, 0, 0, 0);
-  String wifi_dns_str = wifi_connected ? wifi_dns.toString() : "N/A";
-  IPAddress eth_dns = eth_connected ? ETH.dnsIP() : IPAddress(0, 0, 0, 0);
-  String eth_dns_str = eth_connected ? eth_dns.toString() : "N/A";
+  String wifi_dns_str = wifi_connected ? WiFi.dnsIP().toString() : "N/A";
+  String eth_dns_str = eth_connected ? ETH.dnsIP().toString() : "N/A";
   int32_t wifi_rssi = wifi_connected ? WiFi.RSSI() : 0;
   String hostname = String(config.mdns_hostname) + ".local";
 
@@ -707,59 +705,69 @@ bool checkInternetConnectivity() {
   }
 }
 
-// Syncs time with NTP servers
+bool timeSynced = false;
+// Function to sync time with NTP servers
 bool syncNTPTime() {
-  static bool ntpConfigured = false;
-  static int retryCount = 0;
-  const int maxRetries = 5;
-  const char *ntpServers[] = { "216.239.35.0", "pool.ntp.org", "time.google.com", "time.nist.gov" };
+  static const char *ntpServers[] = { "pool.ntp.org", "time.google.com", "time.nist.gov", "216.239.35.0" };
+  static const int numServers = 4;
+  static const int maxRetries = 5;
+  static const unsigned long retryInterval = 5000;  // 5 seconds
+  static int currentServerIndex = 0;
+  static int attemptCount = 0;
+  static unsigned long lastAttemptTime = 0;
 
-  if (!ntpConfigured && network_up) {
-    delay(2000);
-    for (int i = 0; i < maxRetries; i++) {
-      const char *currentServer = ntpServers[retryCount % 4];
-      Serial.println("Configuring NTP with server: " + String(currentServer));
-      if (currentServer && strlen(currentServer) > 0) {
-        configTime(0, 0, currentServer);
-        WiFiUDP udp;
-        if (!udp.begin(123)) {
-          Serial.println("Failed to bind UDP port 123");
-          retryCount++;
-          delay(2000);
-          continue;
-        }
-        Serial.println("Attempting to reach NTP server: " + String(currentServer));
-        IPAddress serverIP;
-        if (WiFi.hostByName(currentServer, serverIP)) {
-          Serial.println("DNS resolved: " + String(currentServer) + " to " + serverIP.toString());
-        } else if (!serverIP.fromString(currentServer)) {
-          Serial.println("DNS resolution failed for: " + String(currentServer));
-          retryCount++;
-          udp.stop();
-          delay(2000);
-          continue;
-        }
-        if (udp.beginPacket(serverIP, 123)) {
-          Serial.println("NTP server reachable: " + String(currentServer));
-          udp.endPacket();
-          ntpConfigured = true;
-          retryCount = 0;
-          udp.stop();
-          return true;
-        } else {
-          Serial.println("Failed to reach NTP server: " + String(currentServer));
-          retryCount++;
-        }
-        udp.stop();
-        delay(2000);
-      } else {
-        Serial.println("NTP server invalid, skipping");
-        return false;
-      }
-    }
-    Serial.println("All NTP retries failed");
+  // Exit if time is already synced
+  if (timeSynced) {
+    return true;
   }
-  return ntpConfigured;
+
+  // Exit if less than 5 seconds since last attempt
+  if ((millis() - lastAttemptTime < retryInterval)) {
+    return false;
+  }
+
+  // Check WiFi connection
+  if (!network_up) {
+    Serial.println("WiFi not connected, cannot sync NTP");
+    return false;
+  }
+
+  // If max retries exceeded, reset and stop
+  if (attemptCount >= maxRetries) {
+    Serial.println("All NTP sync attempts failed");
+    attemptCount = 0;
+    currentServerIndex = 0;
+    return false;
+  }
+
+  // Start or continue sync
+  const char *currentServer = ntpServers[currentServerIndex];
+  if (!currentServer || strlen(currentServer) == 0) {
+    Serial.printf("Invalid NTP server at index %d\n", currentServerIndex);
+    attemptCount++;
+    currentServerIndex = (currentServerIndex + 1) % numServers;
+    return false;
+  }
+
+  Serial.printf("Attempting NTP sync with server: %s (Attempt %d/%d)\n",
+                currentServer, attemptCount + 1, maxRetries);
+  configTime(0, 0, currentServer);
+  lastAttemptTime = millis();
+
+  // Check if time has synced
+  struct tm timeInfo;
+  if (getLocalTime(&timeInfo)) {
+    Serial.printf("Time synced successfully with %s\n", ntpServers[currentServerIndex]);
+    timeSynced = true;
+    attemptCount = 0;
+    currentServerIndex = 0;
+    return true;
+  }
+
+  attemptCount++;
+  currentServerIndex = (currentServerIndex + 1) % numServers;
+
+  return false;
 }
 
 // Sets system time from a WebSocket client
@@ -1225,6 +1233,7 @@ void loop() {
       Serial.print(WiFi.localIP().toString());
     } else if (eth_connected) {
       Serial.print(" Ethernet IP: " + ETH.localIP().toString());
+      Serial.println(" ETH DNS: " + ETH.dnsIP().toString());
     }
     Serial.println(" Free heap: " + String(ESP.getFreeHeap()));
     print_time_count = millis();
@@ -1232,11 +1241,11 @@ void loop() {
   if (shouldCheckInternet() == 1) {
     checkInternetConnectivity();
   }
-  if (millis() - lastI2CScan >= 60000) { // Scan every 60 seconds
+  /*if (millis() - lastI2CScan >= 60000) { // Scan every 60 seconds
     scanI2CSensors();
     sendSensorStatus();
     lastI2CScan = millis();
-  }
+  }*/
   static unsigned long lastTimeSend = 0;
   if (millis() - lastTimeSend > 999) {
     sendTimeToClients();
