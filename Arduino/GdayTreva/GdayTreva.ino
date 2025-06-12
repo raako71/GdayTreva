@@ -9,9 +9,12 @@
 #include <time.h>
 #include <sys/time.h>
 #include <ElegantOTA.h>
-#include <map>     // For subscriber_epochs
-#include <vector>  // For null_program_ids and trigger_info
-#include <Wire.h>  // For I2C communication
+#include <map>
+#include <vector>
+#include <Wire.h>
+#include <queue>
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
 
 #define FORMAT_LITTLEFS_IF_FAILED true
 
@@ -30,15 +33,36 @@ const char *OTA_PASSWORD = "admin";
 // OTA Progress Tracking
 static unsigned long otaProgressMillis = 0;
 
-// Sensor structure to track detected sensors
+// Enhanced Sensor structure
 struct SensorInfo {
-  String type;      // Sensor type (e.g., "ACS71020", "BME280")
-  uint8_t address;  // I2C address
-  bool active;      // Whether sensor is detected
+  String type;                  // Sensor type (e.g., "ACS71020", "BME280")
+  uint8_t address;              // I2C address
+  bool active;                  // Whether sensor is actively polled
+  unsigned long maxPollingInterval; // Polling interval in ms
+  unsigned long lastPollTime;   // Last poll time in ms
+  String lastValue;             // Latest sensor reading
+  bool loggingEnabled;          // Whether logging is enabled
+  bool operator==(const SensorInfo &other) const {
+    return type == other.type && address == other.address && active == other.active &&
+           maxPollingInterval == other.maxPollingInterval && lastPollTime == other.lastPollTime &&
+           lastValue == other.lastValue && loggingEnabled == other.loggingEnabled;
+  }
 };
 
-// Global sensor index
+// Sensor polling structure for priority queue
+struct SensorPoll {
+  SensorInfo *sensor;           // Pointer to sensor info
+  unsigned long nextPollTime;   // Next scheduled poll time
+  bool operator<(const SensorPoll &other) const {
+    return nextPollTime > other.nextPollTime; // Min-heap (earliest first)
+  }
+};
+
+// Global variables
 std::vector<SensorInfo> detectedSensors;
+std::priority_queue<SensorPoll> sensorQueue;
+std::vector<String> logBuffer;
+unsigned long lastLogWrite = 0;
 
 struct Config {
   char ssid[32];
@@ -61,15 +85,18 @@ int activeProgramA = -1, activeProgramB = -1;
 
 std::vector<int> null_program_ids;
 
+// Enhanced ProgramConfig
 struct ProgramConfig {
   int id = -1;                // Program ID (1-10, -1 if invalid)
   String output = "A";        // Output ("A", "B", or "Null")
   String trigger = "Manual";  // Trigger ("Manual", "Cycle Timer", etc.)
   bool active = false;        // Whether the program is active
+  String sensorType;          // Associated sensor type
+  uint8_t sensorAddress;      // Associated sensor address
 };
 ProgramConfig programConfigs[11];
 
-// Cycle Timer state for each output
+// Cycle Timer state
 struct CycleState {
   bool isRunning;
   unsigned long lastSwitchTime;
@@ -96,12 +123,10 @@ int numPrograms = 10;
 bool programsChanged = true;
 bool outputAState = false, outputBState = false;
 
-// Subscriber map and status tracking
 std::map<AsyncWebSocketClient *, uint32_t> subscriber_epochs;
 uint32_t last_output_epoch = 0;
 std::vector<int> last_null_program_ids;
 
-// Trigger info struct
 struct TriggerInfo {
   int id;
   String output;
@@ -110,18 +135,18 @@ struct TriggerInfo {
   String sensor_value;
   bool state;
   bool operator==(const TriggerInfo &other) const {
-    return id == other.id && output == other.output && trigger == other.trigger && next_toggle == other.next_toggle && sensor_value == other.sensor_value && state == other.state;
+    return id == other.id && output == other.output && trigger == other.trigger &&
+           next_toggle == other.next_toggle && sensor_value == other.sensor_value && state == other.state;
   }
 };
 std::vector<TriggerInfo> last_trigger_info;
 
-// I2C Scanner function to detect sensors
+// I2C Scanner function
 void scanI2CSensors() {
   detectedSensors.clear();
   Serial.println("Scanning I2C bus...");
 
-  // Possible I2C addresses for each sensor
-  const uint8_t ACS71020_ADDRESSES[] = { 0x60, 0x61, 0x62, 0x63, 0x64, 0x65, 0x66, 0x67 };  // ACS71020 possible addresses
+  const uint8_t ACS71020_ADDRESSES[] = { 0x60, 0x61, 0x62, 0x63, 0x64, 0x65, 0x66, 0x67 };
   const uint8_t BME280_ADDRESSES[] = { 0x76, 0x77 };
   const uint8_t VEML6030_ADDRESSES[] = { 0x10, 0x48 };
   const uint8_t SHT3X_ADDRESSES[] = { 0x44, 0x45 };
@@ -130,31 +155,27 @@ void scanI2CSensors() {
 
   for (uint8_t address = 0x08; address <= 0x77; address++) {
     Wire.beginTransmission(address);
-    if (Wire.endTransmission() == 0) {  // Device responded
+    if (Wire.endTransmission() == 0) {
       String sensorType = "Unknown";
       bool isSensor = false;
+      unsigned long pollingInterval = 1000; // Default polling interval
 
       // Check ACS71020
       for (uint8_t addr : ACS71020_ADDRESSES) {
         if (address == addr) {
-          // Attempt to read ACS71020 Device ID (Register 0x01)
           Wire.beginTransmission(address);
-          Wire.write(0x01);  // Device ID register
+          Wire.write(0x01);
           if (Wire.endTransmission() == 0) {
             Wire.requestFrom(address, (uint8_t)1);
             if (Wire.available()) {
               uint8_t deviceID = Wire.read();
-              Serial.printf("Device at 0x%02X responded with Device ID: 0x%02X\n", address, deviceID);
-              if (deviceID == 0x0A) {  // ACS71020 Device ID
+              if (deviceID == 0x0A) {
                 sensorType = "ACS71020";
                 isSensor = true;
+                pollingInterval = 100; // Fast polling for current sensor
                 break;
               }
-            } else {
-              Serial.printf("Device at 0x%02X failed to provide Device ID\n", address);
             }
-          } else {
-            Serial.printf("Failed to access Device ID register at 0x%02X\n", address);
           }
         }
       }
@@ -164,6 +185,7 @@ void scanI2CSensors() {
         if (address == addr) {
           sensorType = "BME280";
           isSensor = true;
+          pollingInterval = 1000; // Slower polling for environmental sensor
           break;
         }
       }
@@ -173,6 +195,7 @@ void scanI2CSensors() {
         if (address == addr) {
           sensorType = "VEML6030";
           isSensor = true;
+          pollingInterval = 500; // Moderate polling for light sensor
           break;
         }
       }
@@ -195,35 +218,29 @@ void scanI2CSensors() {
         }
       }
 
-      // Check MCP9600 (if not already identified as ACS71020)
+      // Check MCP9600
       if (sensorType == "Unknown") {
         for (uint8_t addr : MCP9600_ADDRESSES) {
           if (address == addr) {
-            // Attempt to read MCP9600 Device ID (Register 0x40)
             Wire.beginTransmission(address);
-            Wire.write(0x40);  // Device ID register
+            Wire.write(0x40);
             if (Wire.endTransmission() == 0) {
               Wire.requestFrom(address, (uint8_t)1);
               if (Wire.available()) {
                 uint8_t deviceID = Wire.read();
-                Serial.printf("Device at 0x%02X responded with Device ID: 0x%02X\n", address, deviceID);
-                if (deviceID >= 0x40 && deviceID <= 0x44) {  // MCP9600 Device ID range
+                if (deviceID >= 0x40 && deviceID <= 0x44) {
                   sensorType = "MCP9600";
                   isSensor = true;
                   break;
                 }
-              } else {
-                Serial.printf("Device at 0x%02X failed to provide Device ID\n", address);
               }
-            } else {
-              Serial.printf("Failed to access Device ID register at 0x%02X\n", address);
             }
           }
         }
       }
 
       if (isSensor) {
-        detectedSensors.push_back({ sensorType, address, true });
+        detectedSensors.push_back({ sensorType, address, false, pollingInterval, 0, "", false });
         Serial.printf("Identified %s at address 0x%02X\n", sensorType.c_str(), address);
       } else {
         Serial.printf("Unknown device at address 0x%02X\n", address);
@@ -234,7 +251,179 @@ void scanI2CSensors() {
   Serial.printf("I2C scan complete. Found %d sensors.\n", detectedSensors.size());
 }
 
-// Sends sensor status to subscribed clients
+// Polls a single sensor
+bool pollSensor(SensorInfo &sensor) {
+  const int maxRetries = 3;
+  for (int attempt = 1; attempt <= maxRetries; attempt++) {
+    if (sensor.type == "ACS71020") {
+      Wire.beginTransmission(sensor.address);
+      Wire.write(0x20); // Current register
+      if (Wire.endTransmission() == 0) {
+        Wire.requestFrom(sensor.address, (uint8_t)2);
+        if (Wire.available() == 2) {
+          uint16_t raw = (Wire.read() << 8) | Wire.read();
+          float current = raw * 0.1; // Simplified conversion
+          sensor.lastValue = String(current, 2);
+          sensor.lastPollTime = millis();
+          return true;
+        }
+      }
+    } else if (sensor.type == "BME280") {
+      Wire.beginTransmission(sensor.address);
+      Wire.write(0xFA); // Temperature register
+      if (Wire.endTransmission() == 0) {
+        Wire.requestFrom(sensor.address, (uint8_t)3);
+        if (Wire.available() == 3) {
+          uint32_t raw = (Wire.read() << 16) | (Wire.read() << 8) | Wire.read();
+          float temp = (raw >> 4) * 0.01; // Simplified conversion
+          sensor.lastValue = String(temp, 2);
+          sensor.lastPollTime = millis();
+          return true;
+        }
+      }
+    } else if (sensor.type == "VEML6030") {
+      Wire.beginTransmission(sensor.address);
+      Wire.write(0x00); // ALS data register
+      if (Wire.endTransmission() == 0) {
+        Wire.requestFrom(sensor.address, (uint8_t)2);
+        if (Wire.available() == 2) {
+          uint16_t lux = Wire.read() | (Wire.read() << 8);
+          sensor.lastValue = String(lux);
+          sensor.lastPollTime = millis();
+          return true;
+        }
+      }
+    } else {
+      // Generic sensor read (placeholder)
+      Wire.beginTransmission(sensor.address);
+      if (Wire.endTransmission() == 0) {
+        Wire.requestFrom(sensor.address, (uint8_t)2);
+        if (Wire.available() == 2) {
+          uint16_t value = Wire.read() | (Wire.read() << 8);
+          sensor.lastValue = String(value);
+          sensor.lastPollTime = millis();
+          return true;
+        }
+      }
+    }
+    delay(10); // Delay between retries
+  }
+  Serial.printf("Failed to poll %s at 0x%02X after %d attempts\n", sensor.type.c_str(), sensor.address, maxRetries);
+  return false;
+}
+
+// Logs sensor data to buffer
+void logSensorData(const SensorInfo &sensor) {
+  time_t now = getAdjustedTime();
+  char timeStr[20];
+  strftime(timeStr, sizeof(timeStr), "%Y-%m-%d %H:%M:%S", localtime(&now));
+  String logEntry = String(timeStr) + "," + sensor.type + ",0x" + String(sensor.address, HEX) + "," + sensor.lastValue;
+  logBuffer.push_back(logEntry);
+
+  if (logBuffer.size() >= 100 || (millis() - lastLogWrite >= 10000 && !logBuffer.empty())) {
+    File file = LittleFS.open("/sensor_log.csv", FILE_APPEND);
+    if (file) {
+      for (const auto &entry : logBuffer) {
+        file.println(entry);
+      }
+      file.close();
+      logBuffer.clear();
+      lastLogWrite = millis();
+    } else {
+      Serial.println("Failed to open /sensor_log.csv for appending");
+    }
+  }
+}
+
+// Polls active sensors
+void pollActiveSensors() {
+  unsigned long currentTime = millis();
+  while (!sensorQueue.empty() && sensorQueue.top().nextPollTime <= currentTime) {
+    SensorPoll poll = sensorQueue.top();
+    sensorQueue.pop();
+    if (poll.sensor->active) {
+      if (pollSensor(*poll.sensor)) {
+        if (poll.sensor->loggingEnabled) {
+          logSensorData(*poll.sensor);
+        }
+      }
+      SensorPoll nextPoll = { poll.sensor, currentTime + poll.sensor->maxPollingInterval };
+      sensorQueue.push(nextPoll);
+    }
+  }
+}
+
+// Updates active sensors based on programs and logging
+void updateActiveSensors() {
+  // Clear active flags
+  for (auto &sensor : detectedSensors) {
+    sensor.active = false;
+  }
+
+  // Check programs
+  for (int i = 1; i <= numPrograms; i++) {
+    if (programConfigs[i].active && !programConfigs[i].sensorType.isEmpty()) {
+      for (auto &sensor : detectedSensors) {
+        if (sensor.type == programConfigs[i].sensorType && sensor.address == programConfigs[i].sensorAddress) {
+          sensor.active = true;
+          break;
+        }
+      }
+    }
+  }
+
+  // Check logging configuration
+  if (LittleFS.exists("/logging.json")) {
+    File file = LittleFS.open("/logging.json", FILE_READ);
+    if (file) {
+      StaticJsonDocument<512> doc;
+      if (!deserializeJson(doc, file)) {
+        JsonArray sensors = doc.as<JsonArray>();
+        for (const auto &entry : sensors) {
+          String type = entry["type"].as<String>();
+          String addrStr = entry["address"].as<String>();
+          if (!type.isEmpty() && !addrStr.isEmpty()) {
+            uint8_t address = strtol(addrStr.c_str(), nullptr, 16);
+            for (auto &sensor : detectedSensors) {
+              if (sensor.type == type && sensor.address == address) {
+                sensor.active = true;
+                sensor.loggingEnabled = true;
+                break;
+              }
+            }
+          }
+        }
+      }
+      file.close();
+    }
+  }
+
+  // Rebuild polling queue
+  while (!sensorQueue.empty()) {
+    sensorQueue.pop();
+  }
+  unsigned long currentTime = millis();
+  for (auto &sensor : detectedSensors) {
+    if (sensor.active) {
+      unsigned long nextPollTime = sensor.lastPollTime + sensor.maxPollingInterval;
+      if (nextPollTime < currentTime) {
+        nextPollTime = currentTime; // Immediate poll if overdue
+      }
+      sensorQueue.push({ &sensor, nextPollTime });
+    }
+  }
+}
+
+// FreeRTOS task for periodic I2C scanning
+void i2cScanTask(void *parameter) {
+  while (true) {
+    scanI2CSensors();
+    updateActiveSensors();
+    vTaskDelay(60000 / portTICK_PERIOD_MS); // 60 seconds
+  }
+}
+
+// Enhanced sensor status
 void sendSensorStatus() {
   if (subscriber_epochs.empty()) return;
 
@@ -249,6 +438,9 @@ void sendSensorStatus() {
     sensorObj["type"] = sensor.type;
     sensorObj["address"] = String(sensor.address, HEX);
     sensorObj["active"] = sensor.active;
+    if (sensor.active) {
+      sensorObj["value"] = sensor.lastValue;
+    }
   }
 
   String json;
@@ -263,7 +455,7 @@ void sendSensorStatus() {
   }
 }
 
-// Sends output status to subscribed clients
+// Sends output status
 void sendOutputStatus(const std::vector<int> &null_program_ids) {
   if (subscriber_epochs.empty()) return;
 
@@ -294,7 +486,7 @@ void sendOutputStatus(const std::vector<int> &null_program_ids) {
   last_output_epoch = new_epoch;
 }
 
-// Sends trigger status to subscribed clients
+// Sends trigger status
 void sendTriggerStatus(const std::vector<TriggerInfo> &trigger_info) {
   if (subscriber_epochs.empty()) return;
 
@@ -331,7 +523,7 @@ void sendTriggerStatus(const std::vector<TriggerInfo> &trigger_info) {
   }
 }
 
-// Handles network events (Ethernet/WiFi connect/disconnect)
+// Network event handler
 void networkEvent(arduino_event_id_t event) {
   switch (event) {
     case ARDUINO_EVENT_ETH_START:
@@ -345,11 +537,10 @@ void networkEvent(arduino_event_id_t event) {
     case ARDUINO_EVENT_ETH_GOT_IP:
       Serial.println("ETH Got IP");
       Serial.println("Ethernet IP: " + ETH.localIP().toString());
-      Serial.println("ETH DNS: " + ETH.dnsIP().toString());
       network_up = true;
       checkInternetConnectivity();
       if (!MDNS.begin(config.mdns_hostname)) {
-        Serial.println("Error setting up mDNS for Ethernet: " + String(config.mdns_hostname));
+        Serial.println("Error setting up mDNS for Ethernet");
       } else {
         Serial.println("mDNS started as " + String(config.mdns_hostname) + ".local");
         MDNS.addService("http", "tcp", 80);
@@ -385,7 +576,7 @@ void networkEvent(arduino_event_id_t event) {
       network_up = true;
       checkInternetConnectivity();
       if (!MDNS.begin(config.mdns_hostname)) {
-        Serial.println("Error setting up mDNS for WiFi: " + String(config.mdns_hostname));
+        Serial.println("Error setting up mDNS for WiFi");
       } else {
         Serial.println("mDNS started as " + String(config.mdns_hostname) + ".local");
         MDNS.addService("http", "tcp", 80);
@@ -441,10 +632,9 @@ void onWsEvent(AsyncWebSocket *server, AsyncWebSocketClient *client, AwsEventTyp
           } else if (command && strcmp(command, "unsubscribe_output_status") == 0) {
             subscriber_epochs.erase(client);
             Serial.printf("Client #%u unsubscribed from status\n", client->id());
-          } else if (command && (strcmp(command, "get_output_status") == 0 || strcmp(command, "get_trigger_status") == 0)) {
+          } else if (command && strcmp(command, "get_output_status") == 0 || strcmp(command, "get_trigger_status") == 0) {
             sendTriggerStatus(last_trigger_info);
           } else if (command && strcmp(command, "get_sensor_status") == 0) {
-            scanI2CSensors();
             sendSensorStatus();
           } else if (command && strcmp(command, "sync_time") == 0) {
             const char *timeStr = doc["time"].as<const char *>();
@@ -489,7 +679,6 @@ void onWsEvent(AsyncWebSocket *server, AsyncWebSocketClient *client, AwsEventTyp
   }
 }
 
-// Sends error response to WebSocket client
 void sendErrorResponse(AsyncWebSocketClient *client, const char *programID, const char *message) {
   StaticJsonDocument<512> response;
   response["type"] = "get_program_response";
@@ -502,7 +691,6 @@ void sendErrorResponse(AsyncWebSocketClient *client, const char *programID, cons
   Serial.printf("Sent error to client #%u: %s\n", client->id(), message);
 }
 
-// Finds the next available program ID (01-10)
 String getNextProgramID() {
   for (int i = 1; i <= 10; i++) {
     String idStr = String(i);
@@ -515,7 +703,6 @@ String getNextProgramID() {
   return "";
 }
 
-// Sends program save response to WebSocket client
 void sendProgramResponse(AsyncWebSocketClient *client, bool success, const char *message, const char *programID) {
   StaticJsonDocument<512> response;
   response["type"] = "save_program_response";
@@ -528,7 +715,6 @@ void sendProgramResponse(AsyncWebSocketClient *client, bool success, const char 
   Serial.printf("Sent save_program_response to client #%u: %s\n", client->id(), message);
 }
 
-// Retrieves a program by ID and sends it to the WebSocket client
 void handleGetProgram(AsyncWebSocketClient *client, const char *programID) {
   String idStr = String(programID);
   if (idStr.length() != 2 || idStr < "01" || idStr > "10") {
@@ -569,7 +755,6 @@ void handleGetProgram(AsyncWebSocketClient *client, const char *programID) {
   Serial.printf("Sent program %s to client #%u\n", programID, client->id());
 }
 
-// Saves a program received via WebSocket
 void handleSaveProgram(AsyncWebSocketClient *client, const JsonDocument &doc) {
   const char *programID = doc["programID"].as<const char *>();
   const char *content = doc["content"].as<const char *>();
@@ -620,11 +805,16 @@ void handleSaveProgram(AsyncWebSocketClient *client, const JsonDocument &doc) {
   }
 
   file.close();
+  int progId = targetID.toInt();
+  String sensorType = contentDoc["sensor"]["type"].as<String>();
+  String sensorAddrStr = contentDoc["sensor"]["address"].as<String>();
+  uint8_t sensorAddress = sensorAddrStr.isEmpty() ? 0 : strtol(sensorAddrStr.c_str(), nullptr, 16);
+  programConfigs[progId].sensorType = sensorType;
+  programConfigs[progId].sensorAddress = sensorAddress;
   sendProgramResponse(client, true, "Program saved successfully", targetID.c_str());
   programsChanged = true;
 }
 
-// Sends current time and memory usage to all WebSocket clients
 void sendTimeToClients() {
   if (ws.count() > 0) {
     time_t now = time(nullptr);
@@ -644,7 +834,6 @@ void sendTimeToClients() {
   }
 }
 
-// Sends network information to a WebSocket client
 void sendNetworkInfo(AsyncWebSocketClient *client) {
   String wifi_ip = wifi_connected ? WiFi.localIP().toString() : "N/A";
   String eth_ip = eth_connected ? ETH.localIP().toString() : "N/A";
@@ -670,7 +859,7 @@ void sendNetworkInfo(AsyncWebSocketClient *client) {
     doc["wifi_mac"] = wifi_mac;
     doc["wifi_subnet"] = wifi_subnet;
     doc["wifi_dns"] = wifi_dns_str;
-    doc["wifi_dns_2"] =  wifi_dns_2;
+    doc["wifi_dns_2"] = wifi_dns_2;
   }
   if(eth_connected){
     doc["eth_ip"] = eth_ip;
@@ -687,12 +876,11 @@ void sendNetworkInfo(AsyncWebSocketClient *client) {
   Serial.println("Sent network info: " + json);
 }
 
-// Checks internet connectivity by connecting to a host
 bool checkInternetConnectivity() {
   const char *host = config.internet_check_host;
   const int port = 53;
   WiFiClient client;
-  Serial.println("Checking internet connectivity to " + String(host) + "...");
+  Serial.println("Checking internet connectivity to " + String(host));
   if (client.connect(host, port, 5000)) {
     Serial.println("Internet connection confirmed");
     internet_connected = true;
@@ -711,22 +899,19 @@ bool checkInternetConnectivity() {
 }
 
 bool timeSynced = false;
-// Function to sync time with NTP servers
 bool syncNTPTime() {
   static const char *ntpServers[] = { "pool.ntp.org", "time.google.com", "time.nist.gov", "216.239.35.0" };
   static const int numServers = 4;
   static const int maxRetries = 5;
-  static const unsigned long retryInterval = 5000;  // 5 seconds
+  static const unsigned long retryInterval = 5000;
   static int currentServerIndex = 0;
   static int attemptCount = 0;
   static unsigned long lastAttemptTime = 0;
 
-  // Exit if less than 5 seconds since last attempt
   if ((millis() - lastAttemptTime < retryInterval)) {
     return false;
   }
 
-  // If max retries exceeded, reset and stop
   if (attemptCount >= maxRetries) {
     Serial.println("All NTP sync attempts failed");
     attemptCount = 0;
@@ -734,7 +919,6 @@ bool syncNTPTime() {
     return false;
   }
 
-  // Start or continue sync
   const char *currentServer = ntpServers[currentServerIndex];
   if (!currentServer || strlen(currentServer) == 0) {
     Serial.printf("Invalid NTP server at index %d\n", currentServerIndex);
@@ -748,7 +932,6 @@ bool syncNTPTime() {
   configTime(0, 0, currentServer);
   lastAttemptTime = millis();
 
-  // Check if time has synced
   struct tm timeInfo;
   if (getLocalTime(&timeInfo)) {
     Serial.printf("Time synced successfully with %s\n", ntpServers[currentServerIndex]);
@@ -762,7 +945,6 @@ bool syncNTPTime() {
   return false;
 }
 
-// Sets system time from a WebSocket client
 void setTimeFromClient(const char *timeStr) {
   if (timeStr) {
     struct tm tm;
@@ -787,18 +969,16 @@ void setTimeFromClient(const char *timeStr) {
   }
 }
 
-// Checks if internet connectivity should be retested
 int shouldCheckInternet() {
   if (network_up && !internet_connected) {
     if (millis() - lastInternetCheck >= internetCheckInterval) {
-      Serial.println("Retry internet connectivity check triggered (exponential backoff)");
+      Serial.println("Retry internet connectivity check triggered");
       return 1;
     }
   }
   return 0;
 }
 
-// Writes a file to LittleFS
 void writeFile(const char *path, const char *message) {
   Serial.printf("Writing file: %s\r\n", path);
   File file = LittleFS.open(path, FILE_WRITE);
@@ -814,7 +994,6 @@ void writeFile(const char *path, const char *message) {
   file.close();
 }
 
-// Reads configuration from LittleFS
 void readSettings() {
   Serial.println("Reading config");
   File file = LittleFS.open("/config.json");
@@ -846,7 +1025,6 @@ void readSettings() {
   file.close();
 }
 
-// Saves configuration to LittleFS
 void saveConfiguration(const char *filename, const Config &config) {
   File file = LittleFS.open(filename, FILE_WRITE);
   if (!file) {
@@ -868,7 +1046,6 @@ void saveConfiguration(const char *filename, const Config &config) {
   file.close();
 }
 
-// Connects to WiFi
 void WIFI_Connect() {
   Serial.print("\nConnecting to ");
   Serial.println(config.ssid);
@@ -883,7 +1060,6 @@ void WIFI_Connect() {
   }
 }
 
-// Parses ISO 8601 date-time (e.g., "2025-04-27T06:00")
 time_t parseISO8601(const char *dateTime) {
   struct tm tm = { 0 };
   int year, month, day, hour, minute;
@@ -900,13 +1076,11 @@ time_t parseISO8601(const char *dateTime) {
   return mktime(&tm);
 }
 
-// Gets current time adjusted by offset
 time_t getAdjustedTime() {
   time_t now = time(nullptr);
   return now + (config.time_offset_minutes * 60);
 }
 
-// Checks if a program is active based on date, time, and day
 bool isProgramActive(const JsonDocument &doc, int progNum) {
   bool enabled = doc["enabled"].as<bool>();
   if (!enabled) return false;
@@ -962,7 +1136,6 @@ bool isProgramActive(const JsonDocument &doc, int progNum) {
   return true;
 }
 
-// Implements Cycle Timer trigger with startHigh option
 std::pair<bool, time_t> runCycleTimer(const char *output, CycleState &state, const CycleConfig &config) {
   if (!config.valid || config.runSeconds == 0 || config.stopSeconds == 0) {
     return { false, 0 };
@@ -1010,7 +1183,7 @@ void updateOutputs() {
     null_program_ids.clear();
     cycleConfigA = cycleConfigB = { 0, 0, false, false };
     for (int i = 1; i <= numPrograms; i++) {
-      programConfigs[i] = { -1, "A", "Manual", false };
+      programConfigs[i] = { -1, "A", "Manual", false, "", 0 };
       String filename = "/program" + String(i < 10 ? "0" + String(i) : String(i)) + ".json";
       if (!LittleFS.exists(filename)) continue;
       File file = LittleFS.open(filename, FILE_READ);
@@ -1022,7 +1195,10 @@ void updateOutputs() {
       if (!isProgramActive(doc, i)) continue;
       const char *output = doc["output"].as<const char *>() ?: "A";
       const char *trigger = doc["trigger"].as<const char *>() ?: "Manual";
-      programConfigs[i] = { i, String(output), String(trigger), true };
+      String sensorType = doc["sensor"]["type"].as<String>();
+      String sensorAddrStr = doc["sensor"]["address"].as<String>();
+      uint8_t sensorAddress = sensorAddrStr.isEmpty() ? 0 : strtol(sensorAddrStr.c_str(), nullptr, 16);
+      programConfigs[i] = { i, String(output), String(trigger), true, sensorType, sensorAddress };
       if (strcmp(output, "A") == 0 && (activeProgramA == -1 || i < activeProgramA)) {
         activeProgramA = i;
         if (strcmp(trigger, "Cycle Timer") == 0) {
@@ -1043,6 +1219,7 @@ void updateOutputs() {
         null_program_ids.push_back(i);
       }
     }
+    updateActiveSensors();
     programsChanged = false;
   }
 
@@ -1052,11 +1229,16 @@ void updateOutputs() {
     if (programId == -1 || programId < 1 || programId > numPrograms) return;
     ProgramConfig &cfg = programConfigs[programId];
     if (cfg.id == -1) return;
-    TriggerInfo info = { programId, cfg.output, cfg.trigger, next_toggle, "", state };
-    if (cfg.output == "Null" && cfg.trigger != "Manual" && cfg.trigger != "Cycle Timer") {
-      info.sensor_value = "0";
+    String sensorValue = "";
+    if (cfg.output == "Null" && cfg.trigger != "Manual" && cfg.trigger != "Cycle Timer" && !cfg.sensorType.isEmpty()) {
+      for (const auto &sensor : detectedSensors) {
+        if (sensor.active && sensor.type == cfg.sensorType && sensor.address == cfg.sensorAddress) {
+          sensorValue = sensor.lastValue;
+          break;
+        }
+      }
     }
-    trigger_info.push_back(info);
+    trigger_info.push_back({ programId, cfg.output, cfg.trigger, next_toggle, sensorValue, state });
   };
 
   // Output A
@@ -1111,6 +1293,11 @@ void updateOutputs() {
   }
   digitalWrite(OUTPUT_B_PIN, outputBState ? HIGH : LOW);
 
+  // Null programs
+  for (int id : null_program_ids) {
+    addTriggerInfo(id);
+  }
+
   if (trigger_changed || trigger_info != last_trigger_info) {
     sendTriggerStatus(trigger_info);
     last_trigger_info = trigger_info;
@@ -1127,8 +1314,8 @@ void setup() {
   Wire.begin(I2C_SDA, I2C_SCL);
   Serial.println("I2C initialized on SDA: " + String(I2C_SDA) + ", SCL: " + String(I2C_SCL));
 
-  // Perform initial I2C scan
-  scanI2CSensors();
+  // Create FreeRTOS task for I2C scanning
+  xTaskCreatePinnedToCore(i2cScanTask, "I2CScan", 4096, NULL, 1, NULL, 0);
 
   WiFi.onEvent(networkEvent);
   if (!LittleFS.begin(FORMAT_LITTLEFS_IF_FAILED)) {
@@ -1196,12 +1383,11 @@ void setup() {
 
 void loop() {
   static unsigned long lastWiFiRetry = 0;
-  static unsigned long lastI2CScan = 0;
-  if (!wifi_connected && !eth_connected && millis() - lastWiFiRetry >= 30000) {
+  static unsigned long lastNTPSyncCheck = 0;
+  if (!wifi_connected && !eth_connected && millis() - lastWiFiRetry >= 10000) {
     WIFI_Connect();
     lastWiFiRetry = millis();
   }
-  static unsigned long lastNTPSyncCheck = 0;
 
   if (!timeSynced && network_up) syncNTPTime();
 
@@ -1226,6 +1412,7 @@ void loop() {
   static unsigned long lastTimeSend = 0;
   static unsigned long lastOutputUpdate = 0;
   if (millis() - lastOutputUpdate > 100) {
+    pollActiveSensors();
     updateOutputs();
     lastOutputUpdate = millis();
     if (millis() - lastTimeSend > 999) {
