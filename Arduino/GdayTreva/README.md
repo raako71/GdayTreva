@@ -33,3 +33,4 @@
  - 0.1.4: pass millis().
  - 0.2: read sensors.
  - 0.2.1: Disable WiFi when ETH is connected (DNS resetting to 0.0.0.0).
+ - 0.2.2: Pass sensor capabilities, advanced sensor scanning etc.

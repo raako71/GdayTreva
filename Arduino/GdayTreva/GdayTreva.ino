@@ -45,13 +45,15 @@ struct SensorInfo {
   bool active;                  // Whether sensor is actively polled
   unsigned long maxPollingInterval; // Polling interval in ms
   unsigned long lastPollTime;   // Last poll time in ms
-  String lastValue;             // JSON string of latest readings (e.g., "{\"temperature\":25.5}")
+  String lastValue;             // JSON string of latest readings
   bool loggingEnabled;          // Whether logging is enabled
   bool (*pollFunction)(SensorInfo &); // Sensor-specific polling function
+  std::vector<String> capabilities; // Available measurements (e.g., ["Temperature", "Humidity", "Pressure"])
   bool operator==(const SensorInfo &other) const {
     return type == other.type && address == other.address && active == other.active &&
            maxPollingInterval == other.maxPollingInterval && lastPollTime == other.lastPollTime &&
-           lastValue == other.lastValue && loggingEnabled == other.loggingEnabled;
+           lastValue == other.lastValue && loggingEnabled == other.loggingEnabled &&
+           capabilities == other.capabilities;
   }
 };
 
@@ -166,6 +168,7 @@ void scanI2CSensors() {
       bool isSensor = false;
       unsigned long pollingInterval = 1000;
       bool (*pollFunc)(SensorInfo &) = pollGeneric;
+      std::vector<String> capabilities;
 
       // Check ACS71020
       for (uint8_t addr : ACS71020_ADDRESSES) {
@@ -174,6 +177,7 @@ void scanI2CSensors() {
           isSensor = true;
           pollingInterval = 100;
           pollFunc = pollACS71020;
+          capabilities = {"Current", "Voltage", "Power"};
           break;
         }
       }
@@ -185,6 +189,7 @@ void scanI2CSensors() {
           isSensor = true;
           pollingInterval = 1000;
           pollFunc = pollBME280;
+          capabilities = {"Temperature", "Humidity", "Pressure"};
           break;
         }
       }
@@ -196,6 +201,7 @@ void scanI2CSensors() {
           isSensor = true;
           pollingInterval = 500;
           pollFunc = pollVEML6030;
+          capabilities = {"Lux"};
           break;
         }
       }
@@ -207,6 +213,7 @@ void scanI2CSensors() {
           isSensor = true;
           pollingInterval = 1000;
           pollFunc = pollSHT3x;
+          capabilities = {"Temperature", "Humidity"};
           break;
         }
       }
@@ -218,6 +225,7 @@ void scanI2CSensors() {
           isSensor = true;
           pollingInterval = 1000;
           pollFunc = pollGeneric;
+          capabilities = {"Temperature", "Humidity"};
           break;
         }
       }
@@ -229,6 +237,7 @@ void scanI2CSensors() {
           isSensor = true;
           pollingInterval = 1000;
           pollFunc = pollGeneric;
+          capabilities = {"Temperature"};
           break;
         }
       }
@@ -242,10 +251,15 @@ void scanI2CSensors() {
           0,
           "{}",
           false,
-          pollFunc
+          pollFunc,
+          capabilities
         };
         detectedSensors.push_back(sensor);
-        Serial.printf("Identified %s at address 0x%02X\n", sensorType.c_str(), address);
+        Serial.printf("Identified %s at address 0x%02X with capabilities: ", sensorType.c_str(), address);
+        for (const auto &cap : capabilities) {
+          Serial.print(cap + " ");
+        }
+        Serial.println();
       } else {
         Serial.printf("Unknown device at address 0x%02X\n", address);
       }
@@ -523,6 +537,10 @@ void sendSensorStatus() {
     sensorObj["type"] = sensor.type;
     sensorObj["address"] = String(sensor.address, HEX);
     sensorObj["active"] = sensor.active;
+    JsonArray caps = sensorObj.createNestedArray("capabilities");
+    for (const auto &cap : sensor.capabilities) {
+      caps.add(cap);
+    }
     if (sensor.active && !sensor.lastValue.isEmpty()) {
       StaticJsonDocument<256> valueDoc;
       DeserializationError error = deserializeJson(valueDoc, sensor.lastValue);
