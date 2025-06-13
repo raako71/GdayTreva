@@ -170,75 +170,99 @@ void scanI2CSensors() {
       bool (*pollFunc)(SensorInfo &) = pollGeneric;
       std::vector<String> capabilities;
 
-      // Check ACS71020
-      for (uint8_t addr : ACS71020_ADDRESSES) {
-        if (address == addr) {
-          sensorType = "ACS71020";
-          isSensor = true;
-          pollingInterval = 100;
-          pollFunc = pollACS71020;
-          capabilities = {"Current", "Voltage", "Power"};
-          break;
+      // Check for sensors in the overlapping address range (0x60 to 0x67)
+      if (address >= 0x60 && address <= 0x67) {
+        // Attempt to read MCP9600 Device ID register (0x20)
+        Wire.beginTransmission(address);
+        Wire.write(0x20); // Device ID register for MCP9600
+        if (Wire.endTransmission() == 0) {
+          Wire.requestFrom(address, (uint8_t)2);
+          if (Wire.available() == 2) {
+            uint16_t deviceId = (Wire.read() << 8) | Wire.read();
+            if ((deviceId >> 8) == 0x40) { // MCP9600 Device ID
+              sensorType = "MCP9600";
+              isSensor = true;
+              pollingInterval = 1000;
+              pollFunc = pollGeneric;
+              capabilities = {"Temperature"};
+            }
+            else if ((deviceId >> 8) == 0x41) { // MCP9600 Device ID
+              sensorType = "MCP9601";
+              isSensor = true;
+              pollingInterval = 1000;
+              pollFunc = pollGeneric;
+              capabilities = {"Temperature"};
+            }
+          }
+        }
+        // If not MCP9600, assume ACS71020 for these addresses
+        if (!isSensor) {
+          for (uint8_t addr : ACS71020_ADDRESSES) {
+            if (address == addr) {
+              sensorType = "ACS71020";
+              isSensor = true;
+              pollingInterval = 100;
+              pollFunc = pollACS71020;
+              capabilities = {"Current", "Voltage", "Power"};
+              break;
+            }
+          }
         }
       }
 
       // Check BME280
-      for (uint8_t addr : BME280_ADDRESSES) {
-        if (address == addr) {
-          sensorType = "BME280";
-          isSensor = true;
-          pollingInterval = 1000;
-          pollFunc = pollBME280;
-          capabilities = {"Temperature", "Humidity", "Pressure"};
-          break;
+      if (!isSensor) {
+        for (uint8_t addr : BME280_ADDRESSES) {
+          if (address == addr) {
+            sensorType = "BME280";
+            isSensor = true;
+            pollingInterval = 1000;
+            pollFunc = pollBME280;
+            capabilities = {"Temperature", "Humidity", "Pressure"};
+            break;
+          }
         }
       }
 
       // Check VEML6030
-      for (uint8_t addr : VEML6030_ADDRESSES) {
-        if (address == addr) {
-          sensorType = "VEML6030";
-          isSensor = true;
-          pollingInterval = 500;
-          pollFunc = pollVEML6030;
-          capabilities = {"Lux"};
-          break;
+      if (!isSensor) {
+        for (uint8_t addr : VEML6030_ADDRESSES) {
+          if (address == addr) {
+            sensorType = "VEML6030";
+            isSensor = true;
+            pollingInterval = 500;
+            pollFunc = pollVEML6030;
+            capabilities = {"Lux"};
+            break;
+          }
         }
       }
 
       // Check SHT3x
-      for (uint8_t addr : SHT3X_ADDRESSES) {
-        if (address == addr) {
-          sensorType = "SHT3x-DIS";
-          isSensor = true;
-          pollingInterval = 1000;
-          pollFunc = pollSHT3x;
-          capabilities = {"Temperature", "Humidity"};
-          break;
+      if (!isSensor) {
+        for (uint8_t addr : SHT3X_ADDRESSES) {
+          if (address == addr) {
+            sensorType = "SHT3x-DIS";
+            isSensor = true;
+            pollingInterval = 1000;
+            pollFunc = pollSHT3x;
+            capabilities = {"Temperature", "Humidity"};
+            break;
+          }
         }
       }
 
       // Check HDC2080
-      for (uint8_t addr : HDC2080_ADDRESSES) {
-        if (address == addr) {
-          sensorType = "HDC2080";
-          isSensor = true;
-          pollingInterval = 1000;
-          pollFunc = pollGeneric;
-          capabilities = {"Temperature", "Humidity"};
-          break;
-        }
-      }
-
-      // Check MCP9600
-      for (uint8_t addr : MCP9600_ADDRESSES) {
-        if (address == addr) {
-          sensorType = "MCP9600";
-          isSensor = true;
-          pollingInterval = 1000;
-          pollFunc = pollGeneric;
-          capabilities = {"Temperature"};
-          break;
+      if (!isSensor) {
+        for (uint8_t addr : HDC2080_ADDRESSES) {
+          if (address == addr) {
+            sensorType = "HDC2080";
+            isSensor = true;
+            pollingInterval = 1000;
+            pollFunc = pollGeneric;
+            capabilities = {"Temperature", "Humidity"};
+            break;
+          }
         }
       }
 
