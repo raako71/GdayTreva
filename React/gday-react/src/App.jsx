@@ -134,10 +134,7 @@ function App() {
                 break;
               case 'sensor_status':
                 setSensors(data.sensors || []);
-
-                console.log('Received sensor_status:', data);
-                // active status is redundant, should be removed from source.
-                
+                console.log('Received sensor_status:', data);           
                 break;
               default:
                 console.warn('Unknown message type:', data.type);

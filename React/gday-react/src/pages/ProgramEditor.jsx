@@ -44,10 +44,12 @@ function ProgramEditor({ wsRef, isWsReady, programs, sensors }) {
     { value: 'Manual', label: 'Manual' },
     { value: 'Cycle Timer', label: 'Cycle Timer' },
   ];
-  const sensorTriggers = sensors.map((sensor) => ({
-    value: `${sensor.type}_0x${sensor.address}`, // Unique ID, e.g., "ACS71020_0x61"
-    label: `${sensor.type} 0x${sensor.address}`, // Display name, e.g., "ACS71020 0x61"
-  }));
+  const sensorTriggers = sensors.flatMap((sensor) =>
+    (sensor.capabilities || []).map((capability) => ({
+      value: `${sensor.type}_0x${sensor.address}_${capability}`,
+      label: `${sensor.type} 0x${sensor.address} - ${capability}`,
+    }))
+  );
   const triggerOptions = isMonitorOnly
     ? sensorTriggers
     : [...standardTriggers, ...sensorTriggers];
@@ -232,7 +234,7 @@ function ProgramEditor({ wsRef, isWsReady, programs, sensors }) {
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
       const message = {
         command: 'save_program',
-        programID: programID,
+        programID,
         content: sanitizedContent,
       };
       wsRef.current.send(JSON.stringify(message));
@@ -360,7 +362,7 @@ function ProgramEditor({ wsRef, isWsReady, programs, sensors }) {
   return (
     <div className="basic-div">
       <div className="Title">
-      <h1 >Program Editor</h1>
+        <h1>Program Editor</h1>
       </div>
       <div className="Title">
         <button className="save-button" onClick={handleImport}>
@@ -733,6 +735,7 @@ ProgramEditor.propTypes = {
       type: PropTypes.string.isRequired,
       address: PropTypes.string.isRequired,
       active: PropTypes.bool.isRequired,
+      capabilities: PropTypes.arrayOf(PropTypes.string),
     })
   ).isRequired,
 };
