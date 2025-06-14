@@ -40,29 +40,26 @@ SensirionI2cSht3x sht3x;
 
 // Enhanced Sensor structure
 struct SensorInfo {
-  String type;                  // Sensor type (e.g., "ACS71020", "BME280")
-  uint8_t address;              // I2C address
-  bool active;                  // Whether sensor is actively polled
-  unsigned long maxPollingInterval; // Polling interval in ms
-  unsigned long lastPollTime;   // Last poll time in ms
-  String lastValue;             // JSON string of latest readings
-  bool loggingEnabled;          // Whether logging is enabled
-  bool (*pollFunction)(SensorInfo &); // Sensor-specific polling function
-  std::vector<String> capabilities; // Available measurements (e.g., ["Temperature", "Humidity", "Pressure"])
+  String type;                         // Sensor type (e.g., "ACS71020", "BME280")
+  uint8_t address;                     // I2C address
+  bool active;                         // Whether sensor is actively polled
+  unsigned long maxPollingInterval;    // Polling interval in ms
+  unsigned long lastPollTime;          // Last poll time in ms
+  String lastValue;                    // JSON string of latest readings
+  bool loggingEnabled;                 // Whether logging is enabled
+  bool (*pollFunction)(SensorInfo &);  // Sensor-specific polling function
+  std::vector<String> capabilities;    // Available measurements (e.g., ["Temperature", "Humidity", "Pressure"])
   bool operator==(const SensorInfo &other) const {
-    return type == other.type && address == other.address && active == other.active &&
-           maxPollingInterval == other.maxPollingInterval && lastPollTime == other.lastPollTime &&
-           lastValue == other.lastValue && loggingEnabled == other.loggingEnabled &&
-           capabilities == other.capabilities;
+    return type == other.type && address == other.address && active == other.active && maxPollingInterval == other.maxPollingInterval && lastPollTime == other.lastPollTime && lastValue == other.lastValue && loggingEnabled == other.loggingEnabled && capabilities == other.capabilities;
   }
 };
 
 // Sensor polling structure for priority queue
 struct SensorPoll {
-  SensorInfo *sensor;           // Pointer to sensor info
-  unsigned long nextPollTime;   // Next scheduled poll time
+  SensorInfo *sensor;          // Pointer to sensor info
+  unsigned long nextPollTime;  // Next scheduled poll time
   bool operator<(const SensorPoll &other) const {
-    return nextPollTime > other.nextPollTime; // Min-heap (earliest first)
+    return nextPollTime > other.nextPollTime;  // Min-heap (earliest first)
   }
 };
 
@@ -143,8 +140,7 @@ struct TriggerInfo {
   String sensor_value;
   bool state;
   bool operator==(const TriggerInfo &other) const {
-    return id == other.id && output == other.output && trigger == other.trigger &&
-           next_toggle == other.next_toggle && sensor_value == other.sensor_value && state == other.state;
+    return id == other.id && output == other.output && trigger == other.trigger && next_toggle == other.next_toggle && sensor_value == other.sensor_value && state == other.state;
   }
 };
 std::vector<TriggerInfo> last_trigger_info;
@@ -174,24 +170,23 @@ void scanI2CSensors() {
       if (address >= 0x60 && address <= 0x67) {
         // Attempt to read MCP9600 Device ID register (0x20)
         Wire.beginTransmission(address);
-        Wire.write(0x20); // Device ID register for MCP9600
+        Wire.write(0x20);  // Device ID register for MCP9600
         if (Wire.endTransmission() == 0) {
           Wire.requestFrom(address, (uint8_t)2);
           if (Wire.available() == 2) {
             uint16_t deviceId = (Wire.read() << 8) | Wire.read();
-            if ((deviceId >> 8) == 0x40) { // MCP9600 Device ID
+            if ((deviceId >> 8) == 0x40) {  // MCP9600 Device ID
               sensorType = "MCP9600";
               isSensor = true;
               pollingInterval = 1000;
               pollFunc = pollGeneric;
-              capabilities = {"Temperature"};
-            }
-            else if ((deviceId >> 8) == 0x41) { // MCP9600 Device ID
+              capabilities = { "Temperature" };
+            } else if ((deviceId >> 8) == 0x41) {  // MCP9600 Device ID
               sensorType = "MCP9601";
               isSensor = true;
               pollingInterval = 1000;
               pollFunc = pollGeneric;
-              capabilities = {"Temperature"};
+              capabilities = { "Temperature" };
             }
           }
         }
@@ -203,7 +198,7 @@ void scanI2CSensors() {
               isSensor = true;
               pollingInterval = 100;
               pollFunc = pollACS71020;
-              capabilities = {"Current", "Voltage", "Power"};
+              capabilities = { "Current", "Voltage", "Power" };
               break;
             }
           }
@@ -218,7 +213,7 @@ void scanI2CSensors() {
             isSensor = true;
             pollingInterval = 1000;
             pollFunc = pollBME280;
-            capabilities = {"Temperature", "Humidity", "Pressure"};
+            capabilities = { "Temperature", "Humidity", "Pressure" };
             break;
           }
         }
@@ -232,7 +227,7 @@ void scanI2CSensors() {
             isSensor = true;
             pollingInterval = 500;
             pollFunc = pollVEML6030;
-            capabilities = {"Lux"};
+            capabilities = { "Lux" };
             break;
           }
         }
@@ -246,7 +241,7 @@ void scanI2CSensors() {
             isSensor = true;
             pollingInterval = 1000;
             pollFunc = pollSHT3x;
-            capabilities = {"Temperature", "Humidity"};
+            capabilities = { "Temperature", "Humidity" };
             break;
           }
         }
@@ -260,7 +255,7 @@ void scanI2CSensors() {
             isSensor = true;
             pollingInterval = 1000;
             pollFunc = pollGeneric;
-            capabilities = {"Temperature", "Humidity"};
+            capabilities = { "Temperature", "Humidity" };
             break;
           }
         }
@@ -297,12 +292,12 @@ bool pollACS71020(SensorInfo &sensor) {
   const int maxRetries = 3;
   for (int attempt = 1; attempt <= maxRetries; attempt++) {
     Wire.beginTransmission(sensor.address);
-    Wire.write(0x20); // Current register
+    Wire.write(0x20);  // Current register
     if (Wire.endTransmission() == 0) {
       Wire.requestFrom(sensor.address, (uint8_t)2);
       if (Wire.available() == 2) {
         uint16_t raw = (Wire.read() << 8) | Wire.read();
-        float current = raw * 0.1; // Simplified conversion
+        float current = raw * 0.1;  // Simplified conversion
         StaticJsonDocument<128> doc;
         doc["current"] = current;
         serializeJson(doc, sensor.lastValue);
@@ -347,7 +342,7 @@ bool pollSHT3x(SensorInfo &sensor) {
   // Initialize SHT3x if not already done
   static bool initialized = false;
   if (!initialized) {
-    sht3x.begin(Wire, sensor.address); // Pass Wire and address
+    sht3x.begin(Wire, sensor.address);  // Pass Wire and address
     if (sht3x.softReset() != 0) {
       Serial.printf("SHT3x initialization failed at 0x%02X\n", sensor.address);
       return false;
@@ -357,7 +352,7 @@ bool pollSHT3x(SensorInfo &sensor) {
 
   // Read data
   float temp, hum;
-  int16_t error = sht3x.measureSingleShot(REPEATABILITY_HIGH, true, temp, hum); // High repeatability, no clock stretching
+  int16_t error = sht3x.measureSingleShot(REPEATABILITY_HIGH, true, temp, hum);  // High repeatability, no clock stretching
   if (error != 0) {
     Serial.printf("SHT3x read failed at 0x%02X, error: 0x%04X\n", sensor.address, error);
     return false;
@@ -375,7 +370,7 @@ bool pollVEML6030(SensorInfo &sensor) {
   const int maxRetries = 3;
   for (int attempt = 1; attempt <= maxRetries; attempt++) {
     Wire.beginTransmission(sensor.address);
-    Wire.write(0x00); // ALS data register
+    Wire.write(0x00);  // ALS data register
     if (Wire.endTransmission() == 0) {
       Wire.requestFrom(sensor.address, (uint8_t)2);
       if (Wire.available() == 2) {
@@ -439,8 +434,7 @@ void logSensorData(const SensorInfo &sensor) {
   }
 
   for (JsonPair kv : doc.as<JsonObject>()) {
-    String logEntry = String(timeStr) + "," + sensor.type + ",0x" + String(sensor.address, HEX) + "," +
-                      kv.key().c_str() + "," + String(kv.value().as<float>(), 2);
+    String logEntry = String(timeStr) + "," + sensor.type + ",0x" + String(sensor.address, HEX) + "," + kv.key().c_str() + "," + String(kv.value().as<float>(), 2);
     logBuffer.push_back(logEntry);
   }
 
@@ -460,19 +454,28 @@ void logSensorData(const SensorInfo &sensor) {
 }
 // Polls active sensors
 void pollActiveSensors() {
+  bool sensorDataChanged = false;
   unsigned long currentTime = millis();
   while (!sensorQueue.empty() && sensorQueue.top().nextPollTime <= currentTime) {
     SensorPoll poll = sensorQueue.top();
     sensorQueue.pop();
     if (poll.sensor->active) {
+      String prevValue = poll.sensor->lastValue;
       if (pollSensor(*poll.sensor)) {
         if (poll.sensor->loggingEnabled) {
           logSensorData(*poll.sensor);
+        }
+        if (poll.sensor->lastValue != prevValue) {
+          sensorDataChanged = true;
         }
       }
       SensorPoll nextPoll = { poll.sensor, currentTime + poll.sensor->maxPollingInterval };
       sensorQueue.push(nextPoll);
     }
+  }
+  if (sensorDataChanged) {
+    Serial.println("\nNew Sensor Data.");
+    sendSensorStatus();
   }
 }
 
@@ -530,61 +533,71 @@ void updateActiveSensors() {
     if (sensor.active) {
       unsigned long nextPollTime = sensor.lastPollTime + sensor.maxPollingInterval;
       if (nextPollTime < currentTime) {
-        nextPollTime = currentTime; // Immediate poll if overdue
+        nextPollTime = currentTime;  // Immediate poll if overdue
       }
       sensorQueue.push({ &sensor, nextPollTime });
     }
   }
 }
 
-// FreeRTOS task for periodic I2C scanning
+// FreeRTOS task for periodic I2C scanningsendSensorStatus
 void i2cScanTask(void *parameter) {
   while (true) {
     scanI2CSensors();
     updateActiveSensors();
-    vTaskDelay(60000 / portTICK_PERIOD_MS); // 60 seconds
+    vTaskDelay(60000 / portTICK_PERIOD_MS);  // 60 seconds
   }
 }
 
-// Enhanced sensor status
+SemaphoreHandle_t sensorMutex = xSemaphoreCreateMutex();
 void sendSensorStatus() {
   if (subscriber_epochs.empty()) return;
-
-  uint32_t new_epoch = millis();
-  StaticJsonDocument<1024> doc;
-  doc["type"] = "sensor_status";
-  doc["epoch"] = new_epoch;
-
-  JsonArray sensors = doc.createNestedArray("sensors");
-  for (const auto &sensor : detectedSensors) {
-    JsonObject sensorObj = sensors.createNestedObject();
-    sensorObj["type"] = sensor.type;
-    sensorObj["address"] = String(sensor.address, HEX);
-    sensorObj["active"] = sensor.active;
-    JsonArray caps = sensorObj.createNestedArray("capabilities");
-    for (const auto &cap : sensor.capabilities) {
-      caps.add(cap);
-    }
-    if (sensor.active && !sensor.lastValue.isEmpty()) {
-      StaticJsonDocument<256> valueDoc;
-      DeserializationError error = deserializeJson(valueDoc, sensor.lastValue);
-      if (!error) {
-        sensorObj["value"] = valueDoc.as<JsonObject>();
-      } else {
-        sensorObj["value"] = nullptr;
+  if (xSemaphoreTake(sensorMutex, portTICK_PERIOD_MS * 1000) == pdTRUE) {
+    uint32_t new_epoch = millis();
+    size_t jsonSize = detectedSensors.size() * 100 + 256;
+    DynamicJsonDocument doc(jsonSize);
+    doc["type"] = "sensor_status";
+    doc["epoch"] = new_epoch;
+    JsonArray sensors = doc.createNestedArray("sensors");
+    for (const auto &sensor : detectedSensors) {
+      JsonObject sensorObj = sensors.createNestedObject();
+      sensorObj["type"] = sensor.type;
+      char addrStr[5];
+      snprintf(addrStr, sizeof(addrStr), "0x%02X", sensor.address);
+      sensorObj["address"] = addrStr;
+      sensorObj["active"] = sensor.active;
+      JsonArray caps = sensorObj.createNestedArray("capabilities");
+      for (const auto &cap : sensor.capabilities) {
+        caps.add(cap);
+      }
+      if (sensor.active && !sensor.lastValue.isEmpty()) {
+        // Create a temporary JsonDocument to parse lastValue
+        StaticJsonDocument<256> tempDoc;
+        DeserializationError error = deserializeJson(tempDoc, sensor.lastValue);
+        if (!error) {
+          sensorObj["value"] = tempDoc.as<JsonObject>();
+        } else {
+          sensorObj["value"] = nullptr;
+          Serial.printf("Failed to parse sensor.lastValue for %s at 0x%02X: %s\n", 
+                        sensor.type.c_str(), sensor.address, error.c_str());
+        }
       }
     }
-  }
-
-  String json;
-  serializeJson(doc, json);
-
-  for (auto &pair : subscriber_epochs) {
-    if (new_epoch > pair.second) {
-      pair.first->text(json);
-      pair.second = new_epoch;
-      Serial.printf("Sent sensor_status to client #%u\n", pair.first->id());
+    char buffer[1024];
+    size_t len = serializeJson(doc, buffer, sizeof(buffer));
+    if (len == 0) {
+      Serial.println("JSON serialization failed");
+      xSemaphoreGive(sensorMutex);
+      return;
     }
+    for (auto &pair : subscriber_epochs) {
+      if (new_epoch > pair.second) {
+        pair.first->text(buffer);
+        pair.second = new_epoch;
+      }
+    }
+    Serial.println("\nSent sensor data");
+    xSemaphoreGive(sensorMutex);
   }
 }
 
@@ -985,7 +998,7 @@ void sendNetworkInfo(AsyncWebSocketClient *client) {
 
   StaticJsonDocument<512> doc;
   doc["type"] = "network_info";
-  if(wifi_connected){
+  if (wifi_connected) {
     doc["wifi_rssi"] = wifi_rssi;
     doc["wifi_ip"] = wifi_ip;
     doc["wifi_gateway"] = wifi_gateway;
@@ -994,7 +1007,7 @@ void sendNetworkInfo(AsyncWebSocketClient *client) {
     doc["wifi_dns"] = wifi_dns_str;
     doc["wifi_dns_2"] = wifi_dns_2;
   }
-  if(eth_connected){
+  if (eth_connected) {
     doc["eth_ip"] = eth_ip;
     doc["eth_gateway"] = eth_gateway;
     doc["eth_subnet"] = eth_subnet;
