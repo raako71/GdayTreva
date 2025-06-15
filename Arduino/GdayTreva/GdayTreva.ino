@@ -145,9 +145,10 @@ struct TriggerInfo {
 };
 std::vector<TriggerInfo> last_trigger_info;
 
+bool sensorsChanged = false;
 // I2C Scanner function
 void scanI2CSensors() {
-  detectedSensors.clear();
+  std::vector<SensorInfo> newSensors;
   Serial.println("Scanning I2C bus...");
 
   const uint8_t ACS71020_ADDRESSES[] = { 0x60, 0x61, 0x62, 0x63, 0x64, 0x65, 0x66, 0x67 };
@@ -273,7 +274,7 @@ void scanI2CSensors() {
           pollFunc,
           capabilities
         };
-        detectedSensors.push_back(sensor);
+        newSensors.push_back(sensor);
         Serial.printf("Identified %s at address 0x%02X with capabilities: ", sensorType.c_str(), address);
         for (const auto &cap : capabilities) {
           Serial.print(cap + " ");
@@ -284,6 +285,10 @@ void scanI2CSensors() {
       }
     }
   }
+
+  // Compare newSensors with detectedSensors
+  sensorsChanged = (newSensors != detectedSensors);
+  detectedSensors = newSensors;
 
   Serial.printf("I2C scan complete. Found %d sensors.\n", detectedSensors.size());
 }
@@ -475,7 +480,7 @@ void pollActiveSensors() {
   }
   if (sensorDataChanged) {
     Serial.println("\nNew Sensor Data.");
-    sendSensorStatus();
+    //sendSensorStatus();
   }
 }
 
@@ -774,7 +779,6 @@ void onWsEvent(AsyncWebSocket *server, AsyncWebSocketClient *client, AwsEventTyp
             subscriber_epochs[client] = 0;
             Serial.printf("Client #%u subscribed to status\n", client->id());
             sendTriggerStatus(last_trigger_info);
-            sendSensorStatus();
           } else if (command && strcmp(command, "unsubscribe_output_status") == 0) {
             subscriber_epochs.erase(client);
             Serial.printf("Client #%u unsubscribed from status\n", client->id());
@@ -1555,6 +1559,10 @@ void loop() {
   if (shouldCheckInternet() == 1) {
     checkInternetConnectivity();
   }
+  if (sensorsChanged) { 
+    sendSensorStatus(); 
+    sensorsChanged = false; 
+    }
   static unsigned long lastTimeSend = 0;
   static unsigned long lastOutputUpdate = 0;
   if (millis() - lastOutputUpdate > 100) {
