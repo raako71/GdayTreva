@@ -36,3 +36,4 @@ R0.33: ETH DNS2.
 R0.34: ETH settings formatting.
 R0.35: CSS changes.
 R0.36: Sensor capability options.
+R0.37: Sensor capabilities get their own keys.

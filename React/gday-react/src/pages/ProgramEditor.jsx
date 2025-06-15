@@ -19,7 +19,9 @@ function ProgramEditor({ wsRef, isWsReady, programs, sensors }) {
   const [endTimeEnabled, setEndTimeEnabled] = useState(true);
   const [selectedDays, setSelectedDays] = useState([]);
   const [daysPerWeekEnabled, setDaysPerWeekEnabled] = useState(true);
-  const [trigger, setTrigger] = useState('Manual');
+  const [triggerType, setTriggerType] = useState('Manual');
+  const [triggerAddress, setTriggerAddress] = useState('');
+  const [triggerCapability, setTriggerCapability] = useState('');
   const [runTime, setRunTime] = useState({ seconds: '', minutes: '', hours: '' });
   const [stopTime, setStopTime] = useState({ seconds: '', minutes: '', hours: '' });
   const [startHigh, setStartHigh] = useState(true);
@@ -46,8 +48,8 @@ function ProgramEditor({ wsRef, isWsReady, programs, sensors }) {
   ];
   const sensorTriggers = sensors.flatMap((sensor) =>
     (sensor.capabilities || []).map((capability) => ({
-      value: `${sensor.type}_0x${sensor.address}_${capability}`,
-      label: `${sensor.type} 0x${sensor.address} - ${capability}`,
+      value: `${sensor.type}_${sensor.address}_${capability}`,
+      label: `${sensor.type} ${sensor.address} - ${capability}`,
     }))
   );
   const triggerOptions = isMonitorOnly
@@ -79,7 +81,21 @@ function ProgramEditor({ wsRef, isWsReady, programs, sensors }) {
           setEndTimeEnabled(program.endTimeEnabled !== false);
           setSelectedDays(program.selectedDays || []);
           setDaysPerWeekEnabled(program.daysPerWeekEnabled !== false);
-          setTrigger(program.trigger || 'Manual');
+          if (program.triggerType) {
+            setTriggerType(program.triggerType);
+            setTriggerAddress(program.triggerAddress || '');
+            setTriggerCapability(program.triggerCapability || '');
+          } else if (program.trigger) {
+            // Backward compatibility for old trigger format
+            const [type, address, capability] = program.trigger.split('_');
+            setTriggerType(type || 'Manual');
+            setTriggerAddress(address || '');
+            setTriggerCapability(capability || '');
+          } else {
+            setTriggerType('Manual');
+            setTriggerAddress('');
+            setTriggerCapability('');
+          }
           setRunTime({
             seconds: program.runTime?.seconds?.toString() || '',
             minutes: program.runTime?.minutes?.toString() || '',
@@ -198,8 +214,10 @@ function ProgramEditor({ wsRef, isWsReady, programs, sensors }) {
       endTimeEnabled: isMonitorOnly ? false : endTimeEnabled,
       selectedDays: isMonitorOnly ? [] : daysPerWeekEnabled ? selectedDays : [],
       daysPerWeekEnabled: isMonitorOnly ? false : daysPerWeekEnabled,
-      trigger,
-      ...(trigger === 'Cycle Timer' && !isMonitorOnly && {
+      triggerType,
+      triggerAddress: triggerType === 'Manual' || triggerType === 'Cycle Timer' ? '' : triggerAddress,
+      triggerCapability: triggerType === 'Manual' || triggerType === 'Cycle Timer' ? '' : triggerCapability,
+      ...(triggerType === 'Cycle Timer' && !isMonitorOnly && {
         runTime: {
           seconds: parseInt(runTime.seconds) || 0,
           minutes: parseInt(runTime.minutes) || 0,
@@ -282,7 +300,21 @@ function ProgramEditor({ wsRef, isWsReady, programs, sensors }) {
         setEndTimeEnabled(content.endTimeEnabled !== false);
         setSelectedDays(content.selectedDays || []);
         setDaysPerWeekEnabled(content.daysPerWeekEnabled !== false);
-        setTrigger(content.trigger || 'Manual');
+        if (content.triggerType) {
+          setTriggerType(content.triggerType);
+          setTriggerAddress(content.triggerAddress || '');
+          setTriggerCapability(content.triggerCapability || '');
+        } else if (content.trigger) {
+          // Backward compatibility for old trigger format
+          const [type, address, capability] = content.trigger.split('_');
+          setTriggerType(type || 'Manual');
+          setTriggerAddress(address || '');
+          setTriggerCapability(capability || '');
+        } else {
+          setTriggerType('Manual');
+          setTriggerAddress('');
+          setTriggerCapability('');
+        }
         setRunTime({
           seconds: content.runTime?.seconds?.toString() || '',
           minutes: content.runTime?.minutes?.toString() || '',
@@ -325,8 +357,10 @@ function ProgramEditor({ wsRef, isWsReady, programs, sensors }) {
       endTimeEnabled: isMonitorOnly ? false : endTimeEnabled,
       selectedDays: isMonitorOnly ? [] : daysPerWeekEnabled ? selectedDays : [],
       daysPerWeekEnabled: isMonitorOnly ? false : daysPerWeekEnabled,
-      trigger,
-      ...(trigger === 'Cycle Timer' && !isMonitorOnly && {
+      triggerType,
+      triggerAddress: triggerType === 'Manual' || triggerType === 'Cycle Timer' ? '' : triggerAddress,
+      triggerCapability: triggerType === 'Manual' || triggerType === 'Cycle Timer' ? '' : triggerCapability,
+      ...(triggerType === 'Cycle Timer' && !isMonitorOnly && {
         runTime: {
           seconds: parseInt(runTime.seconds) || 0,
           minutes: parseInt(runTime.minutes) || 0,
@@ -357,6 +391,14 @@ function ProgramEditor({ wsRef, isWsReady, programs, sensors }) {
       setStatus('');
       console.error(err);
     }
+  };
+
+  const handleTriggerChange = (e) => {
+    const value = e.target.value;
+    const [type, address, capability] = value.split('_');
+    setTriggerType(type || 'Manual');
+    setTriggerAddress(address || '');
+    setTriggerCapability(capability || '');
   };
 
   return (
@@ -402,7 +444,9 @@ function ProgramEditor({ wsRef, isWsReady, programs, sensors }) {
               setIsMonitorOnly(e.target.checked);
               if (e.target.checked) {
                 setOutput('null');
-                setTrigger(sensorTriggers[0]?.value || 'Manual');
+                setTriggerType(sensorTriggers[0]?.value.split('_')[0] || 'Manual');
+                setTriggerAddress(sensorTriggers[0]?.value.split('_')[1] || '');
+                setTriggerCapability(sensorTriggers[0]?.value.split('_')[2] || '');
               } else {
                 setOutput('A');
               }
@@ -572,19 +616,19 @@ function ProgramEditor({ wsRef, isWsReady, programs, sensors }) {
         <label htmlFor="trigger">Trigger:</label>
         <select
           id="trigger"
-          value={trigger}
-          onChange={(e) => setTrigger(e.target.value)}
+          value={`${triggerType}_${triggerAddress}_${triggerCapability}`}
+          onChange={handleTriggerChange}
           className="input-field"
         >
           {triggerOptions.map((option) => (
-            <option key={option.value} value={option.value}>
+            <option key={programID + '_' + option.value} value={option.value}>
               {option.label}
             </option>
           ))}
         </select>
       </div>
       <div className="trigger-content">
-        {trigger === 'Cycle Timer' && !isMonitorOnly ? (
+        {triggerType === 'Cycle Timer' && !isMonitorOnly ? (
           <div className="time-fields">
             <div className="form-group">
               <label>Run Time:</label>
@@ -677,10 +721,10 @@ function ProgramEditor({ wsRef, isWsReady, programs, sensors }) {
               </small>
             </div>
           </div>
-        ) : trigger === 'Manual' && !isMonitorOnly ? (
+        ) : triggerType === 'Manual' && !isMonitorOnly ? (
           <div className="manual-message">Manually powered on</div>
         ) : (
-          <div className="manual-message">Monitoring {trigger}</div>
+          <div className="manual-message">Monitoring {triggerType} {triggerAddress} {triggerCapability}</div>
         )}
       </div>
       <div className="button-group">
@@ -717,6 +761,9 @@ ProgramEditor.propTypes = {
       selectedDays: PropTypes.arrayOf(PropTypes.string),
       daysPerWeekEnabled: PropTypes.bool,
       trigger: PropTypes.string,
+      triggerType: PropTypes.string,
+      triggerAddress: PropTypes.string,
+      triggerCapability: PropTypes.string,
       runTime: PropTypes.shape({
         seconds: PropTypes.oneOfType([PropTypes.number, PropTypes.string]),
         minutes: PropTypes.oneOfType([PropTypes.number, PropTypes.string]),
