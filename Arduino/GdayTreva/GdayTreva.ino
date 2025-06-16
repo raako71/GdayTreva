@@ -1446,7 +1446,7 @@ void updateProgramCache() {
                                        doc["runTime"]["seconds"].as<int>();
       details.cycleConfig.stopSeconds = (doc["stopTime"]["hours"].as<int>() * 3600) + 
                                         (doc["stopTime"]["minutes"].as<int>() * 60) + 
-                                        doc["runTime"]["seconds"].as<int>();
+                                        doc["stopTime"]["seconds"].as<int>();
       details.cycleConfig.startHigh = doc["startHigh"].as<bool>();
       details.cycleConfig.valid = true;
     }

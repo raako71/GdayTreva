@@ -86,11 +86,16 @@ function ProgramEditor({ wsRef, isWsReady, programs, sensors }) {
             setTriggerAddress(program.triggerAddress || '');
             setTriggerCapability(program.triggerCapability || '');
           } else if (program.trigger) {
-            // Backward compatibility for old trigger format
-            const [type, address, capability] = program.trigger.split('_');
-            setTriggerType(type || 'Manual');
-            setTriggerAddress(address || '');
-            setTriggerCapability(capability || '');
+            if (program.trigger === 'Manual' || program.trigger === 'Cycle Timer') {
+              setTriggerType(program.trigger);
+              setTriggerAddress('');
+              setTriggerCapability('');
+            } else {
+              const [type, address, capability] = program.trigger.split('_');
+              setTriggerType(type || 'Manual');
+              setTriggerAddress(address || '');
+              setTriggerCapability(capability || '');
+            }
           } else {
             setTriggerType('Manual');
             setTriggerAddress('');
@@ -166,7 +171,7 @@ function ProgramEditor({ wsRef, isWsReady, programs, sensors }) {
   };
 
   const validateProgram = () => {
-    if (isMonitorOnly) return null; // Skip validation for monitor-only mode
+    if (isMonitorOnly) return null;
     if (startDateEnabled && endDateEnabled && startDate && endDate) {
       const start = new Date(startDate);
       const end = new Date(endDate);
@@ -185,6 +190,13 @@ function ProgramEditor({ wsRef, isWsReady, programs, sensors }) {
     }
     if (daysPerWeekEnabled && selectedDays.length === 0) {
       return 'At least one day must be selected if days per week is enabled';
+    }
+    if (triggerType === 'Cycle Timer' && !isMonitorOnly) {
+      const runSeconds = (parseInt(runTime.hours) || 0) * 3600 + (parseInt(runTime.minutes) || 0) * 60 + (parseInt(runTime.seconds) || 0);
+      const stopSeconds = (parseInt(stopTime.hours) || 0) * 3600 + (parseInt(stopTime.minutes) || 0) * 60 + (parseInt(stopTime.seconds) || 0);
+      if (runSeconds === 0 || stopSeconds === 0) {
+        return 'Run time and stop time must be greater than 0 for Cycle Timer';
+      }
     }
     return null;
   };
@@ -214,9 +226,10 @@ function ProgramEditor({ wsRef, isWsReady, programs, sensors }) {
       endTimeEnabled: isMonitorOnly ? false : endTimeEnabled,
       selectedDays: isMonitorOnly ? [] : daysPerWeekEnabled ? selectedDays : [],
       daysPerWeekEnabled: isMonitorOnly ? false : daysPerWeekEnabled,
-      triggerType,
-      triggerAddress: triggerType === 'Manual' || triggerType === 'Cycle Timer' ? '' : triggerAddress,
-      triggerCapability: triggerType === 'Manual' || triggerType === 'Cycle Timer' ? '' : triggerCapability,
+      trigger: triggerType === 'Manual' || triggerType === 'Cycle Timer' ? triggerType : undefined,
+      triggerType: triggerType !== 'Manual' && triggerType !== 'Cycle Timer' ? triggerType : undefined,
+      triggerAddress: triggerType !== 'Manual' && triggerType !== 'Cycle Timer' ? triggerAddress : undefined,
+      triggerCapability: triggerType !== 'Manual' && triggerType !== 'Cycle Timer' ? triggerCapability : undefined,
       ...(triggerType === 'Cycle Timer' && !isMonitorOnly && {
         runTime: {
           seconds: parseInt(runTime.seconds) || 0,
@@ -300,16 +313,14 @@ function ProgramEditor({ wsRef, isWsReady, programs, sensors }) {
         setEndTimeEnabled(content.endTimeEnabled !== false);
         setSelectedDays(content.selectedDays || []);
         setDaysPerWeekEnabled(content.daysPerWeekEnabled !== false);
-        if (content.triggerType) {
+        if (content.trigger) {
+          setTriggerType(content.trigger);
+          setTriggerAddress('');
+          setTriggerCapability('');
+        } else if (content.triggerType) {
           setTriggerType(content.triggerType);
           setTriggerAddress(content.triggerAddress || '');
           setTriggerCapability(content.triggerCapability || '');
-        } else if (content.trigger) {
-          // Backward compatibility for old trigger format
-          const [type, address, capability] = content.trigger.split('_');
-          setTriggerType(type || 'Manual');
-          setTriggerAddress(address || '');
-          setTriggerCapability(capability || '');
         } else {
           setTriggerType('Manual');
           setTriggerAddress('');
@@ -357,9 +368,10 @@ function ProgramEditor({ wsRef, isWsReady, programs, sensors }) {
       endTimeEnabled: isMonitorOnly ? false : endTimeEnabled,
       selectedDays: isMonitorOnly ? [] : daysPerWeekEnabled ? selectedDays : [],
       daysPerWeekEnabled: isMonitorOnly ? false : daysPerWeekEnabled,
-      triggerType,
-      triggerAddress: triggerType === 'Manual' || triggerType === 'Cycle Timer' ? '' : triggerAddress,
-      triggerCapability: triggerType === 'Manual' || triggerType === 'Cycle Timer' ? '' : triggerCapability,
+      trigger: triggerType === 'Manual' || triggerType === 'Cycle Timer' ? triggerType : undefined,
+      triggerType: triggerType !== 'Manual' && triggerType !== 'Cycle Timer' ? triggerType : undefined,
+      triggerAddress: triggerType !== 'Manual' && triggerType !== 'Cycle Timer' ? triggerAddress : undefined,
+      triggerCapability: triggerType !== 'Manual' && triggerType !== 'Cycle Timer' ? triggerCapability : undefined,
       ...(triggerType === 'Cycle Timer' && !isMonitorOnly && {
         runTime: {
           seconds: parseInt(runTime.seconds) || 0,
@@ -395,10 +407,24 @@ function ProgramEditor({ wsRef, isWsReady, programs, sensors }) {
 
   const handleTriggerChange = (e) => {
     const value = e.target.value;
-    const [type, address, capability] = value.split('_');
-    setTriggerType(type || 'Manual');
-    setTriggerAddress(address || '');
-    setTriggerCapability(capability || '');
+    if (value === 'Manual' || value === 'Cycle Timer') {
+      setTriggerType(value);
+      setTriggerAddress('');
+      setTriggerCapability('');
+      if (value !== 'Cycle Timer') {
+        setRunTime({ seconds: '', minutes: '', hours: '' });
+        setStopTime({ seconds: '', minutes: '', hours: '' });
+        setStartHigh(true);
+      }
+    } else {
+      const [type, address, capability] = value.split('_');
+      setTriggerType(type);
+      setTriggerAddress(address || '');
+      setTriggerCapability(capability || '');
+      setRunTime({ seconds: '', minutes: '', hours: '' });
+      setStopTime({ seconds: '', minutes: '', hours: '' });
+      setStartHigh(true);
+    }
   };
 
   return (
@@ -449,6 +475,9 @@ function ProgramEditor({ wsRef, isWsReady, programs, sensors }) {
                 setTriggerCapability(sensorTriggers[0]?.value.split('_')[2] || '');
               } else {
                 setOutput('A');
+                setTriggerType('Manual');
+                setTriggerAddress('');
+                setTriggerCapability('');
               }
             }}
           />
@@ -616,7 +645,7 @@ function ProgramEditor({ wsRef, isWsReady, programs, sensors }) {
         <label htmlFor="trigger">Trigger:</label>
         <select
           id="trigger"
-          value={`${triggerType}_${triggerAddress}_${triggerCapability}`}
+          value={triggerType === 'Manual' || triggerType === 'Cycle Timer' ? triggerType : `${triggerType}_${triggerAddress}_${triggerCapability}`}
           onChange={handleTriggerChange}
           className="input-field"
         >
@@ -721,10 +750,12 @@ function ProgramEditor({ wsRef, isWsReady, programs, sensors }) {
               </small>
             </div>
           </div>
-        ) : triggerType === 'Manual' && !isMonitorOnly ? (
-          <div className="manual-message">Manually powered on</div>
         ) : (
-          <div className="manual-message">Monitoring {triggerType} {triggerAddress} {triggerCapability}</div>
+          <div className="manual-message">
+            {triggerType === 'Manual' && !isMonitorOnly
+              ? 'Manually powered on'
+              : `Monitoring ${triggerType} ${triggerAddress} ${triggerCapability}`}
+          </div>
         )}
       </div>
       <div className="button-group">
