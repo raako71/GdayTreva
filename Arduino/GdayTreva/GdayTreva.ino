@@ -146,6 +146,46 @@ struct TriggerInfo {
 std::vector<TriggerInfo> last_trigger_info;
 
 bool sensorsChanged = false;
+
+// Program scheduling structs
+struct ProgramDetails {
+  int id;
+  String output;
+  String trigger;
+  bool enabled;
+  String startDate, endDate;
+  String startTime, endTime;
+  std::vector<String> selectedDays;
+  bool startDateEnabled, endDateEnabled, startTimeEnabled, endTimeEnabled, daysPerWeekEnabled;
+  String sensorType;
+  uint8_t sensorAddress;
+  CycleConfig cycleConfig;
+};
+
+struct PriorityResult {
+  bool isActive;
+  int id;
+  String output;
+  time_t nextTransition;
+  ProgramDetails details;
+};
+
+struct OutputCache {
+  ProgramDetails current;
+  ProgramDetails next;
+  bool hasCurrent;
+  bool hasNext;
+};
+
+struct ProgramCache {
+  OutputCache outputA;
+  OutputCache outputB;
+  std::vector<ProgramDetails> programs;
+};
+
+ProgramCache programCache;
+time_t nextProgramChange = 0;
+
 // I2C Scanner function
 void scanI2CSensors() {
   std::vector<SensorInfo> newSensors;
@@ -1264,44 +1304,6 @@ std::pair<bool, time_t> runCycleTimer(const char *output, CycleState &state, con
   return { state.isOnPhase, state.nextToggle };
 }
 
-// Existing definitions assumed
-struct ProgramDetails {
-  int id;
-  String output;
-  String trigger;
-  bool enabled;
-  String startDate, endDate;
-  String startTime, endTime;
-  std::vector<String> selectedDays;
-  bool startDateEnabled, endDateEnabled, startTimeEnabled, endTimeEnabled, daysPerWeekEnabled;
-  String sensorType;
-  uint8_t sensorAddress;
-  CycleConfig cycleConfig;
-};
-
-struct OutputCache {
-  ProgramDetails current;
-  ProgramDetails next;
-  bool hasCurrent;
-  bool hasNext;
-};
-
-struct ProgramCache {
-  OutputCache outputA;
-  OutputCache outputB;
-  std::vector<ProgramDetails> programs;
-};
-
-ProgramCache programCache;
-time_t nextProgramChange = 0;
-
-struct PriorityResult {
-  bool isActive;
-  int id;
-  String output;
-  time_t nextTransition;
-  ProgramDetails details;
-};
 
 PriorityResult determineProgramPriority(const ProgramDetails &prog, time_t now) {
   PriorityResult result = { false, prog.id, prog.output, 0, prog };
