@@ -1271,36 +1271,30 @@ time_t getAdjustedTime() {
   return now + (config.time_offset_minutes * 60);
 }
 
-std::pair<bool, time_t> runCycleTimer(const char *output, CycleState &state, const CycleConfig &config) {
+std::pair<bool, bool> runCycleTimer(const char *output, CycleState &state, const CycleConfig &config) {
   if (!config.valid || config.runSeconds == 0 || config.stopSeconds == 0) {
     return { false, 0 };
   }
-
   time_t next_toggle = 0;
-  unsigned long now = millis();
-  time_t epoch_now = time(nullptr);
-
+  unsigned long currentMillis = millis();
+  time_t currentEpoch = time(nullptr);
   if (!state.isRunning) {
     state.isRunning = true;
-    state.lastSwitchTime = now;
+    state.lastSwitchTime = currentMillis;
     state.isOnPhase = config.startHigh;
-    state.nextToggle = epoch_now + (config.startHigh ? config.runSeconds : config.stopSeconds);
+    state.nextToggle = currentEpoch + (config.startHigh ? config.runSeconds : config.stopSeconds);
     return { state.isOnPhase, state.nextToggle };
   }
-
-  unsigned long elapsed = now - state.lastSwitchTime;
-  unsigned long cycle_duration_ms = (state.isOnPhase ? config.runSeconds : config.stopSeconds) * 1000;
-
-  if (elapsed >= cycle_duration_ms) {
+  unsigned long elapsedMillis = currentMillis - state.lastSwitchTime;
+  unsigned long cycleDurationMillis = (state.isOnPhase ? config.runSeconds : config.stopSeconds) * 1000;
+  if (elapsedMillis >= cycleDurationMillis) {
     state.isOnPhase = !state.isOnPhase;
-    state.lastSwitchTime = now;
-    state.nextToggle = epoch_now + (state.isOnPhase ? config.runSeconds : config.stopSeconds);
+    state.lastSwitchTime = currentMillis;
+    state.nextToggle = currentEpoch + (state.isOnPhase ? config.runSeconds : config.stopSeconds);
     return { state.isOnPhase, state.nextToggle };
   }
-
-  unsigned long time_since_last_switch_ms = now - state.lastSwitchTime;
-  unsigned long remaining_ms = cycle_duration_ms - time_since_last_switch_ms;
-  next_toggle = epoch_now + (remaining_ms + 999) / 1000;
+  unsigned long remainingMillis = cycleDurationMillis - elapsedMillis;
+  next_toggle = currentEpoch + (remainingMillis + 999) / 1000;
   return { state.isOnPhase, state.nextToggle };
 }
 
@@ -1389,8 +1383,11 @@ PriorityResult determineProgramPriority(const ProgramDetails &prog, time_t now) 
       result.nextTransition = nextDayStart;
     }
   }
-
-  Serial.printf("Program %d: Active=%d, Next transition=%ld\n", prog.id, result.isActive, result.nextTransition);
+  static long double lastSend = 0;
+  if(lastSend != result.nextTransition) {
+    Serial.printf("Program %d: Active=%d, Next transition=%ld\n", prog.id, result.isActive, result.nextTransition);
+    lastSend = result.nextTransition;
+  }
   return result;
 }
 
@@ -1504,126 +1501,172 @@ void updateProgramCache() {
 }
 
 void updateOutputs() {
-  time_t now = getAdjustedTime();
-  if (now < 946684800) {
+  time_t currentTime = getAdjustedTime();
+  if (currentTime < 946684800) { // Epoch before 2000
     digitalWrite(OUTPUT_A_PIN, LOW);
     digitalWrite(OUTPUT_B_PIN, LOW);
     outputAState = outputBState = false;
-    Serial.println("Time invalid, outputs set to LOW");
     return;
   }
 
-  bool reeval = false;
-  if (programsChanged) {
-    Serial.println("Programs changed, triggering re-evaluation");
-    reeval = true;
-  } else if (nextProgramChange != 0 && now >= nextProgramChange) {
-    Serial.printf("Next program change reached at %ld, triggering re-evaluation\n", now);
-    reeval = true;
-  } else if (programCache.outputA.hasCurrent && !determineProgramPriority(programCache.outputA.current, now).isActive) {
-    Serial.printf("Output A current program %d no longer active, triggering re-evaluation\n", activeProgramA);
-    reeval = true;
-  } else if (programCache.outputB.hasCurrent && !determineProgramPriority(programCache.outputB.current, now).isActive) {
-    Serial.printf("Output B current program %d no longer active, triggering re-evaluation\n", activeProgramB);
-    reeval = true;
-  }
+  bool needsReevaluation = programsChanged || (nextProgramChange != 0 && currentTime >= nextProgramChange) ||
+                          (programCache.outputA.hasCurrent && !determineProgramPriority(programCache.outputA.current, currentTime).isActive) ||
+                          (programCache.outputB.hasCurrent && !determineProgramPriority(programCache.outputB.current, currentTime).isActive);
 
-  if (reeval) {
+  if (needsReevaluation) {
     if (programsChanged) {
       updateProgramCache();
       programsChanged = false;
     } else {
-      // Check if current programs are still active
-      if (programCache.outputA.hasCurrent && !determineProgramPriority(programCache.outputA.current, now).isActive) {
+      if (programCache.outputA.hasCurrent && !determineProgramPriority(programCache.outputA.current, currentTime).isActive) {
         activeProgramA = -1;
         programCache.outputA.hasCurrent = false;
-        Serial.printf("Output A: Cleared current program\n");
+        cycleStateA = { false, 0, false, -1, 0 };
       }
-      if (programCache.outputB.hasCurrent && !determineProgramPriority(programCache.outputB.current, now).isActive) {
+      if (programCache.outputB.hasCurrent && !determineProgramPriority(programCache.outputB.current, currentTime).isActive) {
         activeProgramB = -1;
         programCache.outputB.hasCurrent = false;
-        Serial.printf("Output B: Cleared current program\n");
+        cycleStateB = { false, 0, false, -1, 0 };
       }
 
-      // Promote next program if available
-      if (!programCache.outputA.hasCurrent && programCache.outputA.hasNext && determineProgramPriority(programCache.outputA.next, now).isActive) {
+      if (!programCache.outputA.hasCurrent && programCache.outputA.hasNext && determineProgramPriority(programCache.outputA.next, currentTime).isActive) {
         activeProgramA = programCache.outputA.next.id;
         programCache.outputA.current = programCache.outputA.next;
         programCache.outputA.hasCurrent = true;
         programCache.outputA.hasNext = false;
-        Serial.printf("Output A: Promoted next program %d to current\n", activeProgramA);
       }
-      if (!programCache.outputB.hasCurrent && programCache.outputB.hasNext && determineProgramPriority(programCache.outputB.next, now).isActive) {
+      if (!programCache.outputB.hasCurrent && programCache.outputB.hasNext && determineProgramPriority(programCache.outputB.next, currentTime).isActive) {
         activeProgramB = programCache.outputB.next.id;
         programCache.outputB.current = programCache.outputB.next;
         programCache.outputB.hasCurrent = true;
         programCache.outputB.hasNext = false;
-        Serial.printf("Output B: Promoted next program %d to current\n", activeProgramB);
       }
 
-      // Scan all programs if needed
       if (!programCache.outputA.hasCurrent || !programCache.outputB.hasCurrent) {
         int nextAId = numPrograms + 1, nextBId = numPrograms + 1;
         programCache.outputA.hasNext = programCache.outputB.hasNext = false;
         nextProgramChange = 0;
 
-        for (const auto &prog : programCache.programs) {
-          PriorityResult result = determineProgramPriority(prog, now);
+        for (const auto &program : programCache.programs) {
+          PriorityResult result = determineProgramPriority(program, currentTime);
           if (result.isActive) {
-            if (result.output == "A" && !programCache.outputA.hasCurrent && (activeProgramA == -1 || result.id < activeProgramA)) {
+            if (result.output == "A" && !programCache.outputA.hasCurrent && result.id < nextAId) {
               activeProgramA = result.id;
               programCache.outputA.current = result.details;
               programCache.outputA.hasCurrent = true;
-              Serial.printf("Output A: Selected new current program %d\n", result.id);
-            } else if (result.output == "A" && result.id < nextAId) {
               nextAId = result.id;
+            } else if (result.output == "A" && result.id < nextAId) {
               programCache.outputA.next = result.details;
               programCache.outputA.hasNext = true;
-              Serial.printf("Output A: Selected new next program %d\n", result.id);
-            } else if (result.output == "B" && !programCache.outputB.hasCurrent && (activeProgramB == -1 || result.id < activeProgramB)) {
+              nextAId = result.id;
+            } else if (result.output == "B" && !programCache.outputB.hasCurrent && result.id < nextBId) {
               activeProgramB = result.id;
               programCache.outputB.current = result.details;
               programCache.outputB.hasCurrent = true;
-              Serial.printf("Output B: Selected new current program %d\n", result.id);
-            } else if (result.output == "B" && result.id < nextBId) {
               nextBId = result.id;
+            } else if (result.output == "B" && result.id < nextBId) {
               programCache.outputB.next = result.details;
               programCache.outputB.hasNext = true;
-              Serial.printf("Output B: Selected new next program %d\n", result.id);
+              nextBId = result.id;
             }
           }
-          if (result.nextTransition > now && (nextProgramChange == 0 || result.nextTransition < nextProgramChange)) {
+          if (result.nextTransition > currentTime && (nextProgramChange == 0 || result.nextTransition < nextProgramChange)) {
             nextProgramChange = result.nextTransition;
-            Serial.printf("Program %d: Updated nextProgramChange to %ld\n", result.id, nextProgramChange);
           }
         }
       }
 
-      // Update programConfigs and cycleConfig
       if (programCache.outputA.hasCurrent) {
-        const auto &prog = programCache.outputA.current;
-        programConfigs[prog.id] = { prog.id, prog.output, prog.trigger, true, 
-                                   prog.sensorType, prog.sensorAddress };
-        cycleConfigA = prog.cycleConfig;
-        Serial.printf("Output A: Updated config for program %d\n", prog.id);
+        programConfigs[programCache.outputA.current.id] = { programCache.outputA.current.id, programCache.outputA.current.output,
+                                                           programCache.outputA.current.trigger, true, programCache.outputA.current.sensorType,
+                                                           programCache.outputA.current.sensorAddress };
+        cycleConfigA = programCache.outputA.current.cycleConfig;
       } else {
         cycleConfigA = { 0, 0, false, false };
-        Serial.println("Output A: No active program, cleared config");
       }
       if (programCache.outputB.hasCurrent) {
-        const auto &prog = programCache.outputB.current;
-        programConfigs[prog.id] = { prog.id, prog.output, prog.trigger, true, 
-                                   prog.sensorType, prog.sensorAddress };
-        cycleConfigB = prog.cycleConfig;
-        Serial.printf("Output B: Updated config for program %d\n", prog.id);
+        programConfigs[programCache.outputB.current.id] = { programCache.outputB.current.id, programCache.outputB.current.output,
+                                                           programCache.outputB.current.trigger, true, programCache.outputB.current.sensorType,
+                                                           programCache.outputB.current.sensorAddress };
+        cycleConfigB = programCache.outputB.current.cycleConfig;
       } else {
         cycleConfigB = { 0, 0, false, false };
-        Serial.println("Output B: No active program, cleared config");
       }
     }
   }
 
-  // Placeholder for output state management...
+  // Handle Output A
+  if (programCache.outputA.hasCurrent) {
+    const auto &program = programCache.outputA.current;
+    if (program.trigger == "Manual") {
+      outputAState = program.enabled;
+      digitalWrite(OUTPUT_A_PIN, outputAState ? HIGH : LOW);
+      cycleStateA = { false, 0, false, program.id, 0 };
+    } else if (program.trigger == "Cycle Timer") {
+      auto [state, nextToggle] = runCycleTimer("A", cycleStateA, cycleConfigA);
+      outputAState = state;
+      digitalWrite(OUTPUT_A_PIN, outputAState ? HIGH : LOW);
+      cycleStateA.activeProgram = program.id;
+      cycleStateA.nextToggle = nextToggle;
+    } else {
+      outputAState = false;
+      digitalWrite(OUTPUT_A_PIN, LOW);
+      cycleStateA = { false, 0, false, -1, 0 };
+    }
+  } else {
+    outputAState = false;
+    digitalWrite(OUTPUT_A_PIN, LOW);
+    cycleStateA = { false, 0, false, -1, 0 };
+  }
+
+  // Handle Output B
+  if (programCache.outputB.hasCurrent) {
+    const auto &program = programCache.outputB.current;
+    if (program.trigger == "Manual") {
+      outputBState = program.enabled;
+      digitalWrite(OUTPUT_B_PIN, outputBState ? HIGH : LOW);
+      cycleStateB = { false, 0, false, program.id, 0 };
+    } else if (program.trigger == "Cycle Timer") {
+      auto [state, nextToggle] = runCycleTimer("B", cycleStateB, cycleConfigB);
+      outputBState = state;
+      digitalWrite(OUTPUT_B_PIN, outputBState ? HIGH : LOW);
+      cycleStateB.activeProgram = program.id;
+      cycleStateB.nextToggle = nextToggle;
+    } else {
+      outputBState = false;
+      digitalWrite(OUTPUT_B_PIN, LOW);
+      cycleStateB = { false, 0, false, -1, 0 };
+    }
+  } else {
+    outputBState = false;
+    digitalWrite(OUTPUT_B_PIN, LOW);
+    cycleStateB = { false, 0, false, -1, 0 };
+  }
+
+  // Update trigger status for web client
+  std::vector<TriggerInfo> triggerInfo;
+  for (const auto &program : programCache.programs) {
+    TriggerInfo info = { program.id, program.output, program.trigger, 0, "", false };
+    if (program.output == "A" && program.id == activeProgramA) {
+      info.state = outputAState;
+      if (program.trigger == "Cycle Timer") info.next_toggle = cycleStateA.nextToggle;
+    } else if (program.output == "B" && program.id == activeProgramB) {
+      info.state = outputBState;
+      if (program.trigger == "Cycle Timer") info.next_toggle = cycleStateB.nextToggle;
+    }
+    triggerInfo.push_back(info);
+  }
+  for (int id : null_program_ids) {
+    triggerInfo.push_back({ id, "Null", programConfigs[id].trigger, 0, "", false });
+  }
+  if (triggerInfo != last_trigger_info) {
+    sendTriggerStatus(triggerInfo);
+    last_trigger_info = triggerInfo;
+  }
+  if (null_program_ids != last_null_program_ids) {
+    sendOutputStatus(null_program_ids);
+    last_null_program_ids = null_program_ids;
+  }
 }
 
 void setup() {
