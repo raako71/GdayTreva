@@ -35,4 +35,5 @@
  - 0.2.1: Disable WiFi when ETH is connected (DNS resetting to 0.0.0.0).
  - 0.2.2: Pass sensor capabilities, advanced sensor scanning etc.
  - 0.2.3: Differentiate ACS71020 from MCP9600.
- - 0.2.4: sendSensorStatus function correction.
+ - 0.2.4: SendSensorStatus function correction.
+ - 0.2.5: Semaphore for file access.

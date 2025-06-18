@@ -18,6 +18,8 @@
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 
+SemaphoreHandle_t littlefsMutex = NULL;
+
 #define FORMAT_LITTLEFS_IF_FAILED true
 
 // Pin definitions for outputs A and B
@@ -467,35 +469,6 @@ bool pollSensor(SensorInfo &sensor) {
 
 // Logs sensor data to buffer
 void logSensorData(const SensorInfo &sensor) {
-  time_t now = getAdjustedTime();
-  char timeStr[20];
-  strftime(timeStr, sizeof(timeStr), "%Y-%m-%d %H:%M:%S", localtime(&now));
-
-  StaticJsonDocument<256> doc;
-  DeserializationError error = deserializeJson(doc, sensor.lastValue);
-  if (error) {
-    Serial.printf("Failed to parse sensor JSON for %s: %s\n", sensor.type.c_str(), error.c_str());
-    return;
-  }
-
-  for (JsonPair kv : doc.as<JsonObject>()) {
-    String logEntry = String(timeStr) + "," + sensor.type + ",0x" + String(sensor.address, HEX) + "," + kv.key().c_str() + "," + String(kv.value().as<float>(), 2);
-    logBuffer.push_back(logEntry);
-  }
-
-  if (logBuffer.size() >= 100 || (millis() - lastLogWrite >= 10000 && !logBuffer.empty())) {
-    File file = LittleFS.open("/sensor_log.csv", FILE_APPEND);
-    if (file) {
-      for (const auto &entry : logBuffer) {
-        file.println(entry);
-      }
-      file.close();
-      logBuffer.clear();
-      lastLogWrite = millis();
-    } else {
-      Serial.println("Failed to open /sensor_log.csv for appending");
-    }
-  }
 }
 // Polls active sensors
 void pollActiveSensors() {
@@ -589,7 +562,6 @@ void updateActiveSensors() {
 void i2cScanTask(void *parameter) {
   while (true) {
     scanI2CSensors();
-    updateActiveSensors();
     vTaskDelay(60000 / portTICK_PERIOD_MS);  // 60 seconds
   }
 }
@@ -623,7 +595,7 @@ void sendSensorStatus() {
           sensorObj["value"] = tempDoc.as<JsonObject>();
         } else {
           sensorObj["value"] = nullptr;
-          Serial.printf("Failed to parse sensor.lastValue for %s at 0x%02X: %s\n", 
+          Serial.printf("Failed to parse sensor.lastValue for %s at 0x%02X: %s\n",
                         sensor.type.c_str(), sensor.address, error.c_str());
         }
       }
@@ -886,8 +858,14 @@ String getNextProgramID() {
     String idStr = String(i);
     if (i < 10) idStr = "0" + idStr;
     String filename = "/program" + idStr + ".json";
-    if (!LittleFS.exists(filename)) {
-      return idStr;
+    if (xSemaphoreTake(littlefsMutex, portTICK_PERIOD_MS * 1000) == pdTRUE) {
+      bool exists = LittleFS.exists(filename);
+      xSemaphoreGive(littlefsMutex);
+      if (!exists) {
+        return idStr;
+      }
+    } else {
+      Serial.println("Failed to acquire LittleFS mutex for getNextProgramID");
     }
   }
   return "";
@@ -913,36 +891,44 @@ void handleGetProgram(AsyncWebSocketClient *client, const char *programID) {
   }
 
   String filename = "/program" + idStr + ".json";
-  if (!LittleFS.exists(filename)) {
-    sendErrorResponse(client, programID, "Program not found");
-    return;
+  if (xSemaphoreTake(littlefsMutex, portTICK_PERIOD_MS * 1000) == pdTRUE) {
+    if (!LittleFS.exists(filename)) {
+      xSemaphoreGive(littlefsMutex);
+      sendErrorResponse(client, programID, "Program not found");
+      return;
+    }
+
+    File file = LittleFS.open(filename, FILE_READ);
+    if (!file) {
+      xSemaphoreGive(littlefsMutex);
+      sendErrorResponse(client, programID, "Failed to open program file");
+      return;
+    }
+
+    String content = file.readString();
+    file.close();
+
+    StaticJsonDocument<4096> contentDoc;
+    DeserializationError error = deserializeJson(contentDoc, content);
+    if (error) {
+      xSemaphoreGive(littlefsMutex);
+      sendErrorResponse(client, programID, "Invalid JSON in program file");
+      return;
+    }
+
+    StaticJsonDocument<512> response;
+    response["type"] = "get_program_response";
+    response["success"] = true;
+    response["programID"] = programID;
+    response["content"] = content;
+    String jsonResponse;
+    serializeJson(response, jsonResponse);
+    client->text(jsonResponse);
+    Serial.printf("Sent program %s to client #%u\n", programID, client->id());
+    xSemaphoreGive(littlefsMutex);
+  } else {
+    sendErrorResponse(client, programID, "Failed to acquire filesystem lock");
   }
-
-  File file = LittleFS.open(filename, FILE_READ);
-  if (!file) {
-    sendErrorResponse(client, programID, "Failed to open program file");
-    return;
-  }
-
-  String content = file.readString();
-  file.close();
-
-  StaticJsonDocument<4096> contentDoc;
-  DeserializationError error = deserializeJson(contentDoc, content);
-  if (error) {
-    sendErrorResponse(client, programID, "Invalid JSON in program file");
-    return;
-  }
-
-  StaticJsonDocument<512> response;
-  response["type"] = "get_program_response";
-  response["success"] = true;
-  response["programID"] = programID;
-  response["content"] = content;
-  String jsonResponse;
-  serializeJson(response, jsonResponse);
-  client->text(jsonResponse);
-  Serial.printf("Sent program %s to client #%u\n", programID, client->id());
 }
 
 void handleSaveProgram(AsyncWebSocketClient *client, const JsonDocument &doc) {
@@ -982,27 +968,34 @@ void handleSaveProgram(AsyncWebSocketClient *client, const JsonDocument &doc) {
   }
 
   String filename = "/program" + targetID + ".json";
-  File file = LittleFS.open(filename, FILE_WRITE);
-  if (!file) {
-    sendProgramResponse(client, false, "Failed to open file for writing", targetID.c_str());
-    return;
-  }
+  if (xSemaphoreTake(littlefsMutex, portTICK_PERIOD_MS * 1000) == pdTRUE) {
+    File file = LittleFS.open(filename, FILE_WRITE);
+    if (!file) {
+      xSemaphoreGive(littlefsMutex);
+      sendProgramResponse(client, false, "Failed to open file for writing", targetID.c_str());
+      return;
+    }
 
-  if (serializeJson(contentDoc, file) == 0) {
+    if (serializeJson(contentDoc, file) == 0) {
+      file.close();
+      xSemaphoreGive(littlefsMutex);
+      sendProgramResponse(client, false, "Failed to write program", targetID.c_str());
+      return;
+    }
+
     file.close();
-    sendProgramResponse(client, false, "Failed to write program", targetID.c_str());
-    return;
+    xSemaphoreGive(littlefsMutex);
+    int progId = targetID.toInt();
+    String sensorType = contentDoc["sensor"]["type"].as<String>();
+    String sensorAddrStr = contentDoc["sensor"]["address"].as<String>();
+    uint8_t sensorAddress = sensorAddrStr.isEmpty() ? 0 : strtol(sensorAddrStr.c_str(), nullptr, 16);
+    programConfigs[progId].sensorType = sensorType;
+    programConfigs[progId].sensorAddress = sensorAddress;
+    sendProgramResponse(client, true, "Program saved successfully", targetID.c_str());
+    programsChanged = true;
+  } else {
+    sendProgramResponse(client, false, "Failed to acquire filesystem lock", targetID.c_str());
   }
-
-  file.close();
-  int progId = targetID.toInt();
-  String sensorType = contentDoc["sensor"]["type"].as<String>();
-  String sensorAddrStr = contentDoc["sensor"]["address"].as<String>();
-  uint8_t sensorAddress = sensorAddrStr.isEmpty() ? 0 : strtol(sensorAddrStr.c_str(), nullptr, 16);
-  programConfigs[progId].sensorType = sensorType;
-  programConfigs[progId].sensorAddress = sensorAddress;
-  sendProgramResponse(client, true, "Program saved successfully", targetID.c_str());
-  programsChanged = true;
 }
 
 void sendTimeToClients() {
@@ -1185,55 +1178,68 @@ void writeFile(const char *path, const char *message) {
 }
 
 void readSettings() {
-  Serial.println("Reading config");
-  File file = LittleFS.open("/config.json");
-  if (!file) {
-    Serial.println("Failed to open config, using defaults");
-    strlcpy(config.ssid, "defaultSSID", sizeof(config.ssid));
-    strlcpy(config.password, "defaultPass", sizeof(config.password));
-    strlcpy(config.mdns_hostname, "gday", sizeof(config.mdns_hostname));
-    strlcpy(config.ntp_server, "pool.ntp.org", sizeof(config.ntp_server));
-    strlcpy(config.internet_check_host, "1.1.1.1", sizeof(config.internet_check_host));
-    config.time_offset_minutes = 0;
-    return;
-  }
-  StaticJsonDocument<512> doc;
-  DeserializationError error = deserializeJson(doc, file);
-  if (error) {
-    Serial.print(F("Failed to read file!!!: "));
-    Serial.println(error.c_str());
+  if (xSemaphoreTake(littlefsMutex, portTICK_PERIOD_MS * 1000) == pdTRUE) {
+    Serial.println("Reading config");
+    File file = LittleFS.open("/config.json");
+    if (!file) {
+      Serial.println("Failed to open config, using defaults");
+      strlcpy(config.ssid, "defaultSSID", sizeof(config.ssid));
+      strlcpy(config.password, "defaultPass", sizeof(config.password));
+      strlcpy(config.mdns_hostname, "gday", sizeof(config.mdns_hostname));
+      strlcpy(config.ntp_server, "pool.ntp.org", sizeof(config.ntp_server));
+      strlcpy(config.internet_check_host, "1.1.1.1", sizeof(config.internet_check_host));
+      config.time_offset_minutes = 0;
+      xSemaphoreGive(littlefsMutex);
+      return;
+    }
+    StaticJsonDocument<512> doc;
+    DeserializationError error = deserializeJson(doc, file);
+    if (error) {
+      Serial.print(F("Failed to read file!!!: "));
+      Serial.println(error.c_str());
+      file.close();
+      xSemaphoreGive(littlefsMutex);
+      return;
+    }
+    Serial.println("Read Config.");
+    strlcpy(config.ssid, doc["ssid"].as<const char *>() ?: "defaultSSID", sizeof(config.ssid));
+    strlcpy(config.password, doc["password"].as<const char *>() ?: "defaultPass", sizeof(config.password));
+    strlcpy(config.mdns_hostname, doc["mdns_hostname"].as<const char *>() ?: "gday", sizeof(config.mdns_hostname));
+    strlcpy(config.ntp_server, doc["ntp_server"].as<const char *>() ?: "pool.ntp.org", sizeof(config.ntp_server));
+    strlcpy(config.internet_check_host, doc["internet_check_host"].as<const char *>() ?: "1.1.1.1", sizeof(config.internet_check_host));
+    config.time_offset_minutes = doc["time_offset_minutes"].as<int>();
     file.close();
-    return;
+    xSemaphoreGive(littlefsMutex);
+  } else {
+    Serial.println("Failed to acquire LittleFS mutex for readSettings");
   }
-  Serial.println("Read Config.");
-  strlcpy(config.ssid, doc["ssid"].as<const char *>() ?: "defaultSSID", sizeof(config.ssid));
-  strlcpy(config.password, doc["password"].as<const char *>() ?: "defaultPass", sizeof(config.password));
-  strlcpy(config.mdns_hostname, doc["mdns_hostname"].as<const char *>() ?: "gday", sizeof(config.mdns_hostname));
-  strlcpy(config.ntp_server, doc["ntp_server"].as<const char *>() ?: "pool.ntp.org", sizeof(config.ntp_server));
-  strlcpy(config.internet_check_host, doc["internet_check_host"].as<const char *>() ?: "1.1.1.1", sizeof(config.internet_check_host));
-  config.time_offset_minutes = doc["time_offset_minutes"].as<int>();
-  file.close();
 }
 
 void saveConfiguration(const char *filename, const Config &config) {
-  File file = LittleFS.open(filename, FILE_WRITE);
-  if (!file) {
-    Serial.println(F("Failed to create file"));
-    return;
-  }
-  StaticJsonDocument<512> doc;
-  doc["ssid"] = config.ssid;
-  doc["password"] = config.password;
-  doc["mdns_hostname"] = config.mdns_hostname;
-  doc["ntp_server"] = config.ntp_server;
-  doc["internet_check_host"] = config.internet_check_host;
-  doc["time_offset_minutes"] = config.time_offset_minutes;
-  if (serializeJson(doc, file) == 0) {
-    Serial.println(F("Failed to write to file"));
+  if (xSemaphoreTake(littlefsMutex, portTICK_PERIOD_MS * 1000) == pdTRUE) {
+    File file = LittleFS.open(filename, FILE_WRITE);
+    if (!file) {
+      Serial.println(F("Failed to create file"));
+      xSemaphoreGive(littlefsMutex);
+      return;
+    }
+    StaticJsonDocument<512> doc;
+    doc["ssid"] = config.ssid;
+    doc["password"] = config.password;
+    doc["mdns_hostname"] = config.mdns_hostname;
+    doc["ntp_server"] = config.ntp_server;
+    doc["internet_check_host"] = config.internet_check_host;
+    doc["time_offset_minutes"] = config.time_offset_minutes;
+    if (serializeJson(doc, file) == 0) {
+      Serial.println(F("Failed to write to file"));
+    } else {
+      Serial.println(F("Configuration saved"));
+    }
+    file.close();
+    xSemaphoreGive(littlefsMutex);
   } else {
-    Serial.println(F("Configuration saved"));
+    Serial.println("Failed to acquire LittleFS mutex for saveConfiguration");
   }
-  file.close();
 }
 
 void WIFI_Connect() {
@@ -1384,7 +1390,7 @@ PriorityResult determineProgramPriority(const ProgramDetails &prog, time_t now) 
     }
   }
   static long double lastSend = 0;
-  if(lastSend != result.nextTransition) {
+  if (lastSend != result.nextTransition) {
     Serial.printf("Program %d: Active=%d, Next transition=%ld\n", prog.id, result.isActive, result.nextTransition);
     lastSend = result.nextTransition;
   }
@@ -1402,66 +1408,69 @@ void updateProgramCache() {
 
   for (int i = 1; i <= numPrograms; i++) {
     String filename = "/program" + String(i < 10 ? "0" + String(i) : String(i)) + ".json";
-    if (!LittleFS.exists(filename)) {
-      Serial.printf("Program %d: File %s does not exist\n", i, filename.c_str());
-      continue;
-    }
-    File file = LittleFS.open(filename, FILE_READ);
-    if (!file) {
-      Serial.printf("Program %d: Failed to open file %s\n", i, filename.c_str());
-      continue;
-    }
-    String content = file.readString();
-    file.close();
-    StaticJsonDocument<4096> doc;
-    if (deserializeJson(doc, content)) {
-      Serial.printf("Program %d: Failed to parse JSON\n", i);
-      continue;
-    }
+    if (xSemaphoreTake(littlefsMutex, portTICK_PERIOD_MS * 1000) == pdTRUE) {
+      if (!LittleFS.exists(filename)) {
+        Serial.printf("Program %d: File %s does not exist\n", i, filename.c_str());
+        xSemaphoreGive(littlefsMutex);
+        continue;
+      }
+      File file = LittleFS.open(filename, FILE_READ);
+      if (!file) {
+        xSemaphoreGive(littlefsMutex);
+        Serial.printf("Program %d: Failed to open file %s\n", i, filename.c_str());
+        continue;
+      }
+      String content = file.readString();
+      file.close();
+      xSemaphoreGive(littlefsMutex);
+      StaticJsonDocument<4096> doc;
+      if (deserializeJson(doc, content)) {
+        Serial.printf("Program %d: Failed to parse JSON\n", i);
+        continue;
+      }
 
-    ProgramDetails details;
-    details.id = i;
-    details.output = doc["output"].as<String>() ?: "A";
-    details.trigger = doc["trigger"].as<String>() ?: "Manual";
-    details.enabled = doc["enabled"].as<bool>();
-    details.startDate = doc["startDate"].as<String>();
-    details.endDate = doc["endDate"].as<String>();
-    details.startTime = doc["startTime"].as<String>();
-    details.endTime = doc["endTime"].as<String>();
-    details.startDateEnabled = doc["startDateEnabled"].as<bool>();
-    details.endDateEnabled = doc["endDateEnabled"].as<bool>();
-    details.startTimeEnabled = doc["startTimeEnabled"].as<bool>();
-    details.endTimeEnabled = doc["endTimeEnabled"].as<bool>();
-    details.daysPerWeekEnabled = doc["daysPerWeekEnabled"].as<bool>();
-    details.selectedDays.clear();
-    JsonArray daysArray = doc["selectedDays"];
-    for (JsonVariant day : daysArray) {
-      details.selectedDays.push_back(day.as<String>());
-    }
-    details.sensorType = doc["sensor"]["type"].as<String>();
-    details.sensorAddress = strtol(doc["sensor"]["address"].as<const char *>() ?: "0", nullptr, 16);
-    if (details.trigger == "Cycle Timer") {
-      details.cycleConfig.runSeconds = (doc["runTime"]["hours"].as<int>() * 3600) + 
-                                       (doc["runTime"]["minutes"].as<int>() * 60) + 
-                                       doc["runTime"]["seconds"].as<int>();
-      details.cycleConfig.stopSeconds = (doc["stopTime"]["hours"].as<int>() * 3600) + 
-                                        (doc["stopTime"]["minutes"].as<int>() * 60) + 
-                                        doc["stopTime"]["seconds"].as<int>();
-      details.cycleConfig.startHigh = doc["startHigh"].as<bool>();
-      details.cycleConfig.valid = true;
-    }
+      ProgramDetails details;
+      details.id = i;
+      details.output = doc["output"].as<String>() ?: "A";
+      details.trigger = doc["trigger"].as<String>() ?: "Manual";
+      details.enabled = doc["enabled"].as<bool>();
+      details.startDate = doc["startDate"].as<String>();
+      details.endDate = doc["endDate"].as<String>();
+      details.startTime = doc["startTime"].as<String>();
+      details.endTime = doc["endTime"].as<String>();
+      details.startDateEnabled = doc["startDateEnabled"].as<bool>();
+      details.endDateEnabled = doc["endDateEnabled"].as<bool>();
+      details.startTimeEnabled = doc["startTimeEnabled"].as<bool>();
+      details.endTimeEnabled = doc["endTimeEnabled"].as<bool>();
+      details.daysPerWeekEnabled = doc["daysPerWeekEnabled"].as<bool>();
+      details.selectedDays.clear();
+      JsonArray daysArray = doc["selectedDays"];
+      for (JsonVariant day : daysArray) {
+        details.selectedDays.push_back(day.as<String>());
+      }
+      details.sensorType = doc["sensor"]["type"].as<String>();
+      details.sensorAddress = strtol(doc["sensor"]["address"].as<const char *>() ?: "0", nullptr, 16);
+      if (details.trigger == "Cycle Timer") {
+        details.cycleConfig.runSeconds = (doc["runTime"]["hours"].as<int>() * 3600) + (doc["runTime"]["minutes"].as<int>() * 60) + doc["runTime"]["seconds"].as<int>();
+        details.cycleConfig.stopSeconds = (doc["stopTime"]["hours"].as<int>() * 3600) + (doc["stopTime"]["minutes"].as<int>() * 60) + doc["stopTime"]["seconds"].as<int>();
+        details.cycleConfig.startHigh = doc["startHigh"].as<bool>();
+        details.cycleConfig.valid = true;
+      }
 
-    Serial.printf("Program %d: Loaded, Output=%s, Enabled=%d, Days=[", i, details.output.c_str(), details.enabled);
-    for (const auto &day : details.selectedDays) {
-      Serial.print(day + ",");
-    }
-    Serial.println("]");
+      Serial.printf("Program %d: Loaded, Output=%s, Enabled=%d, Days=[", i, details.output.c_str(), details.enabled);
+      for (const auto &day : details.selectedDays) {
+        Serial.print(day + ",");
+      }
+      Serial.println("]");
 
-    if (details.output == "Null" && details.enabled) {
-      null_program_ids.push_back(details.id);
-      Serial.printf("Program %d: Added to null_program_ids\n", i);
+      if (details.output == "Null" && details.enabled) {
+        null_program_ids.push_back(details.id);
+        Serial.printf("Program %d: Added to null_program_ids\n", i);
+      } else {
+        programCache.programs.push_back(details);
+      }
     } else {
-      programCache.programs.push_back(details);
+      Serial.printf("Program %d: Failed to acquire LittleFS mutex\n", i);
     }
   }
 
@@ -1502,16 +1511,14 @@ void updateProgramCache() {
 
 void updateOutputs() {
   time_t currentTime = getAdjustedTime();
-  if (currentTime < 946684800) { // Epoch before 2000
+  if (currentTime < 946684800) {  // Epoch before 2000
     digitalWrite(OUTPUT_A_PIN, LOW);
     digitalWrite(OUTPUT_B_PIN, LOW);
     outputAState = outputBState = false;
     return;
   }
 
-  bool needsReevaluation = programsChanged || (nextProgramChange != 0 && currentTime >= nextProgramChange) ||
-                          (programCache.outputA.hasCurrent && !determineProgramPriority(programCache.outputA.current, currentTime).isActive) ||
-                          (programCache.outputB.hasCurrent && !determineProgramPriority(programCache.outputB.current, currentTime).isActive);
+  bool needsReevaluation = programsChanged || (nextProgramChange != 0 && currentTime >= nextProgramChange) || (programCache.outputA.hasCurrent && !determineProgramPriority(programCache.outputA.current, currentTime).isActive) || (programCache.outputB.hasCurrent && !determineProgramPriority(programCache.outputB.current, currentTime).isActive);
 
   if (needsReevaluation) {
     if (programsChanged) {
@@ -1578,16 +1585,16 @@ void updateOutputs() {
 
       if (programCache.outputA.hasCurrent) {
         programConfigs[programCache.outputA.current.id] = { programCache.outputA.current.id, programCache.outputA.current.output,
-                                                           programCache.outputA.current.trigger, true, programCache.outputA.current.sensorType,
-                                                           programCache.outputA.current.sensorAddress };
+                                                            programCache.outputA.current.trigger, true, programCache.outputA.current.sensorType,
+                                                            programCache.outputA.current.sensorAddress };
         cycleConfigA = programCache.outputA.current.cycleConfig;
       } else {
         cycleConfigA = { 0, 0, false, false };
       }
       if (programCache.outputB.hasCurrent) {
         programConfigs[programCache.outputB.current.id] = { programCache.outputB.current.id, programCache.outputB.current.output,
-                                                           programCache.outputB.current.trigger, true, programCache.outputB.current.sensorType,
-                                                           programCache.outputB.current.sensorAddress };
+                                                            programCache.outputB.current.trigger, true, programCache.outputB.current.sensorType,
+                                                            programCache.outputB.current.sensorAddress };
         cycleConfigB = programCache.outputB.current.cycleConfig;
       } else {
         cycleConfigB = { 0, 0, false, false };
@@ -1675,6 +1682,12 @@ void setup() {
   totalHeap = ESP.getHeapSize();
   Serial.println("Total heap size: " + String(totalHeap) + " bytes");
 
+  littlefsMutex = xSemaphoreCreateMutex();
+  if (littlefsMutex == NULL) {
+    Serial.println("Failed to create LittleFS mutex");
+    return;
+  }
+
   // Initialize I2C
   Wire.begin(I2C_SDA, I2C_SCL);
   Serial.println("I2C initialized on SDA: " + String(I2C_SDA) + ", SCL: " + String(I2C_SCL));
@@ -1717,23 +1730,31 @@ void setup() {
     if (request->hasParam("filename")) {
       String filename = request->getParam("filename")->value();
       Serial.println("Requested file: /" + filename);
-      if (LittleFS.exists("/" + filename)) {
-        Serial.println("File exists");
-        File file = LittleFS.open("/" + filename, "r");
-        if (file) {
-          Serial.println("File opened, size: " + String(file.size()));
-          String content = file.readString();
-          Serial.println("File content: " + content);
-          Serial.println("Free heap: " + String(ESP.getFreeHeap()));
-          file.close();
-          request->send(200, "text/plain", content);
-          return;
+      if (xSemaphoreTake(littlefsMutex, portTICK_PERIOD_MS * 1000) == pdTRUE) {
+        if (LittleFS.exists("/" + filename)) {
+          Serial.println("File exists");
+          File file = LittleFS.open("/" + filename, "r");
+          if (file) {
+            Serial.println("File opened, size: " + String(file.size()));
+            String content = file.readString();
+            Serial.println("File content: " + content);
+            Serial.println("Free heap: " + String(ESP.getFreeHeap()));
+            file.close();
+            xSemaphoreGive(littlefsMutex);
+            request->send(200, "text/plain", content);
+            return;
+          }
+          Serial.println("Failed to open file");
+          xSemaphoreGive(littlefsMutex);
+          request->send(404, "text/plain", "File not found");
+        } else {
+          Serial.println("File does not exist");
+          xSemaphoreGive(littlefsMutex);
+          request->send(404, "text/plain", "File not found");
         }
-        Serial.println("Failed to open file");
-        request->send(404, "text/plain", "File not found");
       } else {
-        Serial.println("File does not exist");
-        request->send(404, "text/plain", "File not found");
+        Serial.println("Failed to acquire LittleFS mutex for /getFile");
+        request->send(500, "text/plain", "Filesystem lock timeout");
       }
     } else {
       Serial.println("No filename provided");
@@ -1774,14 +1795,14 @@ void loop() {
   if (shouldCheckInternet() == 1) {
     checkInternetConnectivity();
   }
-  if (sensorsChanged) { 
-    sendSensorStatus(); 
-    sensorsChanged = false; 
-    }
+  if (sensorsChanged) {
+    sendSensorStatus();
+    sensorsChanged = false;
+  }
   static unsigned long lastTimeSend = 0;
   static unsigned long lastOutputUpdate = 0;
   if (millis() - lastOutputUpdate > 100) {
-    pollActiveSensors();
+    //pollActiveSensors();
     updateOutputs();
     lastOutputUpdate = millis();
     if (millis() - lastTimeSend > 999) {
