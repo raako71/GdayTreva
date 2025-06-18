@@ -131,6 +131,7 @@ function App() {
                 break;
               case 'trigger_status':
                 setTriggerStatus(data);
+                console.log("Trigger Data:", data)
                 break;
               case 'sensor_status':
                 setSensors(data.sensors || []);

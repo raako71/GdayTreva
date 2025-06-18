@@ -37,3 +37,4 @@
  - 0.2.3: Differentiate ACS71020 from MCP9600.
  - 0.2.4: SendSensorStatus function correction.
  - 0.2.5: Semaphore for file access.
+ - 0.2.6: Formatting, working on trigger status WS message.

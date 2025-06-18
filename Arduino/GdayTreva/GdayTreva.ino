@@ -651,6 +651,7 @@ void sendOutputStatus(const std::vector<int> &null_program_ids) {
 
 // Sends trigger status
 void sendTriggerStatus(const std::vector<TriggerInfo> &trigger_info) {
+  Serial.println("Sending Trigger status.");
   if (subscriber_epochs.empty()) return;
 
   uint32_t new_epoch = millis();
@@ -956,6 +957,19 @@ void handleSaveProgram(AsyncWebSocketClient *client, const JsonDocument &doc) {
   if (contentSize > 4096) {
     sendProgramResponse(client, false, "Program size exceeds 4KB", "");
     return;
+  }
+
+  if (contentDoc["trigger"].as<String>() == "Cycle Timer") {
+    int runSeconds = (contentDoc["runTime"]["hours"].as<int>() * 3600) +
+                     (contentDoc["runTime"]["minutes"].as<int>() * 60) +
+                     contentDoc["runTime"]["seconds"].as<int>();
+    int stopSeconds = (contentDoc["stopTime"]["hours"].as<int>() * 3600) +
+                      (contentDoc["stopTime"]["minutes"].as<int>() * 60) +
+                      contentDoc["stopTime"]["seconds"].as<int>();
+    if (runSeconds <= 0 || stopSeconds <= 0) {
+      sendProgramResponse(client, false, "Cycle Timer requires non-zero run and stop times", "");
+      return;
+    }
   }
 
   String targetID = idStr;
@@ -1300,7 +1314,7 @@ std::pair<bool, bool> runCycleTimer(const char *output, CycleState &state, const
     return { state.isOnPhase, state.nextToggle };
   }
   unsigned long remainingMillis = cycleDurationMillis - elapsedMillis;
-  next_toggle = currentEpoch + (remainingMillis + 999) / 1000;
+  state.nextToggle = currentEpoch + (remainingMillis + 999) / 1000;
   return { state.isOnPhase, state.nextToggle };
 }
 
