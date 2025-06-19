@@ -18,8 +18,14 @@
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 
-#define DEBUG_PRINT(level, ...) do { if (debugLevel >= level) Serial.printf(__VA_ARGS__); } while (0)
-#define DEBUG_PRINTLN(level, str) do { if (debugLevel >= level) Serial.println(str); } while (0)
+#define DEBUG_PRINT(level, ...) \
+  do { \
+    if (debugLevel >= level) Serial.printf(__VA_ARGS__); \
+  } while (0)
+#define DEBUG_PRINTLN(level, str) \
+  do { \
+    if (debugLevel >= level) Serial.println(str); \
+  } while (0)
 
 SemaphoreHandle_t littlefsMutex = NULL;
 
@@ -146,15 +152,15 @@ bool sensorsChanged = false;
 // Program scheduling structs
 struct ProgramDetails {
   int id;
-  String output;
-  String trigger;
   bool enabled;
-  String startDate, endDate;
-  String startTime, endTime;
-  std::vector<String> selectedDays;
+  String output;
+  String startDate, endDate, startTime, endTime;
   bool startDateEnabled, endDateEnabled, startTimeEnabled, endTimeEnabled, daysPerWeekEnabled;
+  std::vector<String> selectedDays;
+  String trigger;
   String sensorType;
   uint8_t sensorAddress;
+  String sensorCapability;
   CycleConfig cycleConfig;
 };
 
@@ -173,7 +179,7 @@ struct OutputCache {
   bool hasNext;
 };
 
-   ProgramCache {
+ProgramCache {
   OutputCache outputA;
   OutputCache outputB;
   std::vector<ProgramDetails> programs;
@@ -185,7 +191,7 @@ time_t nextProgramChange = 0;
 // I2C Scanner function
 void scanI2CSensors() {
   std::vector<SensorInfo> newSensors;
-  DEBUG_PRINT(1,"Scanning I2C bus...\n");
+  DEBUG_PRINT(1, "Scanning I2C bus...\n");
 
   const uint8_t ACS71020_ADDRESSES[] = { 0x60, 0x61, 0x62, 0x63, 0x64, 0x65, 0x66, 0x67 };
   const uint8_t BME280_ADDRESSES[] = { 0x76, 0x77 };
@@ -312,13 +318,13 @@ void scanI2CSensors() {
         };
         newSensors.push_back(sensor);
         DEBUG_PRINT(1, "Identified %s at address 0x%02X with capabilities: ", sensorType.c_str(), address);
-    for (const auto &cap : capabilities) {
-        DEBUG_PRINT(1, "%s ", cap.c_str()); // Fixed line
-    }
-    DEBUG_PRINT(1, "\n");
-} else {
-    DEBUG_PRINT(1, "Unknown device at address 0x%02X\n", address);
-}
+        for (const auto &cap : capabilities) {
+          DEBUG_PRINT(1, "%s ", cap.c_str());  // Fixed line
+        }
+        DEBUG_PRINT(1, "\n");
+      } else {
+        DEBUG_PRINT(1, "Unknown device at address 0x%02X\n", address);
+      }
     }
   }
 
@@ -326,7 +332,7 @@ void scanI2CSensors() {
   sensorsChanged = (newSensors != detectedSensors);
   detectedSensors = newSensors;
 
-  DEBUG_PRINT(1,"I2C scan complete. Found %d sensors.\n", detectedSensors.size());
+  DEBUG_PRINT(1, "I2C scan complete. Found %d sensors.\n", detectedSensors.size());
 }
 
 bool pollACS71020(SensorInfo &sensor) {
@@ -355,7 +361,7 @@ bool pollBME280(SensorInfo &sensor) {
   static bool initialized = false;
   if (!initialized) {
     if (!bme280.begin(sensor.address, &Wire)) {
-      DEBUG_PRINT(1,"BME280 initialization failed at 0x%02X\n", sensor.address);
+      DEBUG_PRINT(1, "BME280 initialization failed at 0x%02X\n", sensor.address);
       return false;
     }
     initialized = true;
@@ -366,7 +372,7 @@ bool pollBME280(SensorInfo &sensor) {
   float pres = bme280.readPressure() / 100.0F;
 
   if (isnan(temp) || isnan(hum) || isnan(pres)) {
-    DEBUG_PRINT(1,"BME280 read failed at 0x%02X\n", sensor.address);
+    DEBUG_PRINT(1, "BME280 read failed at 0x%02X\n", sensor.address);
     return false;
   }
 
@@ -385,7 +391,7 @@ bool pollSHT3x(SensorInfo &sensor) {
   if (!initialized) {
     sht3x.begin(Wire, sensor.address);  // Pass Wire and address
     if (sht3x.softReset() != 0) {
-      DEBUG_PRINT(1,"SHT3x initialization failed at 0x%02X\n", sensor.address);
+      DEBUG_PRINT(1, "SHT3x initialization failed at 0x%02X\n", sensor.address);
       return false;
     }
     initialized = true;
@@ -395,7 +401,7 @@ bool pollSHT3x(SensorInfo &sensor) {
   float temp, hum;
   int16_t error = sht3x.measureSingleShot(REPEATABILITY_HIGH, true, temp, hum);  // High repeatability, no clock stretching
   if (error != 0) {
-    DEBUG_PRINT(1,"SHT3x read failed at 0x%02X, error: 0x%04X\n", sensor.address, error);
+    DEBUG_PRINT(1, "SHT3x read failed at 0x%02X, error: 0x%04X\n", sensor.address, error);
     return false;
   }
 
@@ -454,7 +460,7 @@ bool pollSensor(SensorInfo &sensor) {
   if (sensor.pollFunction) {
     bool success = sensor.pollFunction(sensor);
     if (!success) {
-      DEBUG_PRINT(1,"Failed to poll %s at 0x%02X\n", sensor.type.c_str(), sensor.address);
+      DEBUG_PRINT(1, "Failed to poll %s at 0x%02X\n", sensor.type.c_str(), sensor.address);
     }
     return success;
   }
@@ -486,7 +492,7 @@ void pollActiveSensors() {
     }
   }
   if (sensorDataChanged) {
-    DEBUG_PRINT(1,"\nNew Sensor Data.\n");
+    DEBUG_PRINT(1, "\nNew Sensor Data.\n");
     //sendSensorStatus();
   }
 }
@@ -528,8 +534,8 @@ void sendSensorStatus() {
           sensorObj["value"] = tempDoc.as<JsonObject>();
         } else {
           sensorObj["value"] = nullptr;
-          DEBUG_PRINT(1,"Failed to parse sensor.lastValue for %s at 0x%02X: %s\n",
-                        sensor.type.c_str(), sensor.address, error.c_str());
+          DEBUG_PRINT(1, "Failed to parse sensor.lastValue for %s at 0x%02X: %s\n",
+                      sensor.type.c_str(), sensor.address, error.c_str());
         }
       }
     }
@@ -576,7 +582,7 @@ void sendOutputStatus(const std::vector<int> &null_program_ids) {
     if (new_epoch > pair.second) {
       pair.first->text(json);
       pair.second = new_epoch;
-      DEBUG_PRINT(1,"Sent output_status to client #%u\n", pair.first->id());
+      DEBUG_PRINT(1, "Sent output_status to client #%u\n", pair.first->id());
     }
   }
   last_output_epoch = new_epoch;
@@ -615,7 +621,7 @@ void sendTriggerStatus(const std::vector<TriggerInfo> &trigger_info) {
     if (new_epoch > pair.second) {
       pair.first->text(json);
       pair.second = new_epoch;
-      DEBUG_PRINT(1,"Sent trigger_status to client #%u\n", pair.first->id());
+      DEBUG_PRINT(1, "Sent trigger_status to client #%u\n", pair.first->id());
     }
   }
 }
@@ -697,7 +703,7 @@ void networkEvent(arduino_event_id_t event) {
 void onWsEvent(AsyncWebSocket *server, AsyncWebSocketClient *client, AwsEventType type, void *arg, uint8_t *data, size_t len) {
   switch (type) {
     case WS_EVT_CONNECT:
-      DEBUG_PRINT(1,"WebSocket client #%u connected from %s\n", client->id(), client->remoteIP().toString().c_str());
+      DEBUG_PRINT(1, "WebSocket client #%u connected from %s\n", client->id(), client->remoteIP().toString().c_str());
       {
         StaticJsonDocument<256> doc;
         doc["type"] = "time_offset";
@@ -711,23 +717,23 @@ void onWsEvent(AsyncWebSocket *server, AsyncWebSocketClient *client, AwsEventTyp
       sendSensorStatus();
       break;
     case WS_EVT_DISCONNECT:
-      DEBUG_PRINT(2,"WebSocket client #%u disconnected\n", client->id());
+      DEBUG_PRINT(2, "WebSocket client #%u disconnected\n", client->id());
       subscriber_epochs.erase(client);
       break;
     case WS_EVT_DATA:
       {
-        DEBUG_PRINT(1,"WebSocket client #%u sent data: %s\n", client->id(), (char *)data);
+        DEBUG_PRINT(1, "WebSocket client #%u sent data: %s\n", client->id(), (char *)data);
         StaticJsonDocument<512> doc;
         DeserializationError error = deserializeJson(doc, (char *)data, len);
         if (!error) {
           const char *command = doc["command"].as<const char *>();
           if (command && strcmp(command, "subscribe_output_status") == 0) {
             subscriber_epochs[client] = 0;
-            DEBUG_PRINT(1,"Client #%u subscribed to status\n", client->id());
+            DEBUG_PRINT(1, "Client #%u subscribed to status\n", client->id());
             sendTriggerStatus(last_trigger_info);
           } else if (command && strcmp(command, "unsubscribe_output_status") == 0) {
             subscriber_epochs.erase(client);
-            DEBUG_PRINT(1,"Client #%u unsubscribed from status\n", client->id());
+            DEBUG_PRINT(1, "Client #%u unsubscribed from status\n", client->id());
           } else if (command && strcmp(command, "get_output_status") == 0 || strcmp(command, "get_trigger_status") == 0) {
             sendTriggerStatus(last_trigger_info);
           } else if (command && strcmp(command, "get_sensor_status") == 0) {
@@ -753,7 +759,7 @@ void onWsEvent(AsyncWebSocket *server, AsyncWebSocketClient *client, AwsEventTyp
             if (offset >= -720 && offset <= 840) {
               config.time_offset_minutes = offset;
               saveConfiguration("/config.json", config);
-              DEBUG_PRINT(1,"Time offset updated to %d minutes\n", offset);
+              DEBUG_PRINT(1, "Time offset updated to %d minutes\n", offset);
               StaticJsonDocument<256> response;
               response["type"] = "time_offset";
               response["offset_minutes"] = config.time_offset_minutes;
@@ -784,7 +790,7 @@ void sendErrorResponse(AsyncWebSocketClient *client, const char *programID, cons
   String jsonResponse;
   serializeJson(response, jsonResponse);
   client->text(jsonResponse);
-  DEBUG_PRINT(1,"Sent error to client #%u: %s\n", client->id(), message);
+  DEBUG_PRINT(1, "Sent error to client #%u: %s\n", client->id(), message);
 }
 
 String getNextProgramID() {
@@ -814,7 +820,7 @@ void sendProgramResponse(AsyncWebSocketClient *client, bool success, const char 
   String jsonResponse;
   serializeJson(response, jsonResponse);
   client->text(jsonResponse);
-  DEBUG_PRINT(1,"Sent save_program_response to client #%u: %s\n", client->id(), message);
+  DEBUG_PRINT(1, "Sent save_program_response to client #%u: %s\n", client->id(), message);
 }
 
 void handleGetProgram(AsyncWebSocketClient *client, const char *programID) {
@@ -858,7 +864,7 @@ void handleGetProgram(AsyncWebSocketClient *client, const char *programID) {
     String jsonResponse;
     serializeJson(response, jsonResponse);
     client->text(jsonResponse);
-    DEBUG_PRINT(1,"Sent program %s to client #%u\n", programID, client->id());
+    DEBUG_PRINT(1, "Sent program %s to client #%u\n", programID, client->id());
     xSemaphoreGive(littlefsMutex);
   } else {
     sendErrorResponse(client, programID, "Failed to acquire filesystem lock");
@@ -1047,20 +1053,20 @@ bool syncNTPTime() {
 
   const char *currentServer = ntpServers[currentServerIndex];
   if (!currentServer || strlen(currentServer) == 0) {
-    DEBUG_PRINT(1,"Invalid NTP server at index %d\n", currentServerIndex);
+    DEBUG_PRINT(1, "Invalid NTP server at index %d\n", currentServerIndex);
     attemptCount++;
     currentServerIndex = (currentServerIndex + 1) % numServers;
     return false;
   }
 
-  DEBUG_PRINT(1,"Attempting NTP sync with server: %s (Attempt %d/%d)\n",
-                currentServer, attemptCount + 1, maxRetries);
+  DEBUG_PRINT(1, "Attempting NTP sync with server: %s (Attempt %d/%d)\n",
+              currentServer, attemptCount + 1, maxRetries);
   configTime(0, 0, currentServer);
   lastAttemptTime = millis();
 
   struct tm timeInfo;
   if (getLocalTime(&timeInfo)) {
-    DEBUG_PRINT(1,"Time synced successfully with %s\n", ntpServers[currentServerIndex]);
+    DEBUG_PRINT(1, "Time synced successfully with %s\n", ntpServers[currentServerIndex]);
     timeSynced = true;
     attemptCount = 0;
     currentServerIndex = 0;
@@ -1106,7 +1112,7 @@ int shouldCheckInternet() {
 }
 
 void writeFile(const char *path, const char *message) {
-  DEBUG_PRINT(1,"Writing file: %s\r\n", path);
+  DEBUG_PRINT(1, "Writing file: %s\r\n", path);
   File file = LittleFS.open(path, FILE_WRITE);
   if (!file) {
     Serial.println("- failed to open file for writing");
@@ -1221,11 +1227,13 @@ time_t getAdjustedTime() {
 }
 
 std::pair<bool, bool> runCycleTimer(const char *output, CycleState &state, const CycleConfig &config) {
-  
+
   if (!config.valid || config.runSeconds == 0 || config.stopSeconds == 0) {
     DEBUG_PRINT(3, "runCycleTimer: Output=%s, INVALID config (valid=%d, runSeconds=%d, stopSeconds=%d)\n", output, config.valid, config.runSeconds, config.stopSeconds);
     return { false, 0 };
-  } else { DEBUG_PRINT(2, "runCycleTimer: Output=%s, Valid config (valid=%d, runSeconds=%d, stopSeconds=%d)\n", output, config.valid, config.runSeconds, config.stopSeconds); }
+  } else {
+    DEBUG_PRINT(2, "runCycleTimer: Output=%s, Valid config (valid=%d, runSeconds=%d, stopSeconds=%d)\n", output, config.valid, config.runSeconds, config.stopSeconds);
+  }
   time_t next_toggle = 0;
   unsigned long currentMillis = millis();
   time_t currentEpoch = time(nullptr);
@@ -1253,7 +1261,7 @@ std::pair<bool, bool> runCycleTimer(const char *output, CycleState &state, const
 PriorityResult determineProgramPriority(const ProgramDetails &prog, time_t now) {
   PriorityResult result = { false, prog.id, prog.output, 0, prog };
   if (!prog.enabled) {
-    DEBUG_PRINT(1,"Program %d: Disabled\n", prog.id);
+    DEBUG_PRINT(3, "Program %d: Disabled\n", prog.id);
     return result;
   }
 
@@ -1264,13 +1272,13 @@ PriorityResult determineProgramPriority(const ProgramDetails &prog, time_t now) 
   // Handle start/end dates
   if (prog.startDateEnabled && !prog.startDate.isEmpty()) {
     startEpoch = parseISO8601(prog.startDate.c_str());
-    if (now < startEpoch && (result.nextTransition == 0 || startEpoch < result.nextTransition)) {
+    if (now < startEpoch) {
       result.nextTransition = startEpoch;
     }
   }
   if (prog.endDateEnabled && !prog.endDate.isEmpty()) {
     endEpoch = parseISO8601(prog.endDate.c_str());
-    if (endEpoch > now && (result.nextTransition == 0 || endEpoch < result.nextTransition)) {
+    if (endEpoch > now && (result.nextTransition == 0) {
       result.nextTransition = endEpoch;
     }
   }
@@ -1280,7 +1288,7 @@ PriorityResult determineProgramPriority(const ProgramDetails &prog, time_t now) 
   if (prog.startTimeEnabled && prog.endTimeEnabled && !prog.startTime.isEmpty() && !prog.endTime.isEmpty()) {
     sscanf(prog.startTime.c_str(), "%d:%d", &startHour, &startMinute);
     sscanf(prog.endTime.c_str(), "%d:%d", &endHour, &endMinute);
-    DEBUG_PRINT(1,"Program %d: Start time %02d:%02d, End time %02d:%02d\n", prog.id, startHour, startMinute, endHour, endMinute);
+    DEBUG_PRINT(1, "Program %d: Start time %02d:%02d, End time %02d:%02d\n", prog.id, startHour, startMinute, endHour, endMinute);
   }
 
   // Handle days of the week
@@ -1310,7 +1318,7 @@ PriorityResult determineProgramPriority(const ProgramDetails &prog, time_t now) 
         result.nextTransition = nextDayTransition;
       }
     }
-    DEBUG_PRINT(1,"Program %d: Day valid=%d, Next day transition=%ld\n", prog.id, dayValid, nextDayTransition);
+    DEBUG_PRINT(1, "Program %d: Day valid=%d, Next day transition=%ld\n", prog.id, dayValid, nextDayTransition);
   } else {
     dayValid = true;
   }
@@ -1336,14 +1344,14 @@ PriorityResult determineProgramPriority(const ProgramDetails &prog, time_t now) 
   }
   static long double lastSend = 0;
   if (lastSend != result.nextTransition) {
-    DEBUG_PRINT(1,"Program %d: Active=%d, Next transition=%ld\n", prog.id, result.isActive, result.nextTransition);
+    DEBUG_PRINT(1, "Program %d: Active=%d, Next transition=%ld\n", prog.id, result.isActive, result.nextTransition);
     lastSend = result.nextTransition;
   }
   return result;
 }
 
 void updateProgramCache() {
-  Serial.println("Updating program cache...");
+  DEBUG_PRINTLN(1, "Updating program cache...");
   programCache.programs.clear();
   null_program_ids.clear();
   programCache.outputA = { ProgramDetails{}, ProgramDetails{}, false, false };
@@ -1355,14 +1363,14 @@ void updateProgramCache() {
     String filename = "/program" + String(i < 10 ? "0" + String(i) : String(i)) + ".json";
     if (xSemaphoreTake(littlefsMutex, portTICK_PERIOD_MS * 1000) == pdTRUE) {
       if (!LittleFS.exists(filename)) {
-        DEBUG_PRINT(1,"Program %d: File %s does not exist\n", i, filename.c_str());
+        DEBUG_PRINT(2, "Program %d: File %s does not exist\n", i, filename.c_str());
         xSemaphoreGive(littlefsMutex);
         continue;
       }
       File file = LittleFS.open(filename, FILE_READ);
       if (!file) {
         xSemaphoreGive(littlefsMutex);
-        DEBUG_PRINT(1,"Program %d: Failed to open file %s\n", i, filename.c_str());
+        DEBUG_PRINT(1, "Program %d: Failed to open file %s\n", i, filename.c_str());
         continue;
       }
       String content = file.readString();
@@ -1370,55 +1378,50 @@ void updateProgramCache() {
       xSemaphoreGive(littlefsMutex);
       StaticJsonDocument<4096> doc;
       if (deserializeJson(doc, content)) {
-        DEBUG_PRINT(1,"Program %d: Failed to parse JSON\n", i);
+        DEBUG_PRINT(1, "Program %d: Failed to parse JSON\n", i);
         continue;
       }
 
       ProgramDetails details;
       details.id = i;
-      details.output = doc["output"].as<String>() ?: "A";
-      details.trigger = doc["trigger"].as<String>() ?: "Manual";
       details.enabled = doc["enabled"].as<bool>();
+      details.output = doc["output"].as<String>() ?: "null";
       details.startDate = doc["startDate"].as<String>();
-      details.endDate = doc["endDate"].as<String>();
-      details.startTime = doc["startTime"].as<String>();
-      details.endTime = doc["endTime"].as<String>();
       details.startDateEnabled = doc["startDateEnabled"].as<bool>();
+      details.endDate = doc["endDate"].as<String>();
       details.endDateEnabled = doc["endDateEnabled"].as<bool>();
+      details.startTime = doc["startTime"].as<String>();
       details.startTimeEnabled = doc["startTimeEnabled"].as<bool>();
+      details.endTime = doc["endTime"].as<String>();
       details.endTimeEnabled = doc["endTimeEnabled"].as<bool>();
-      details.daysPerWeekEnabled = doc["daysPerWeekEnabled"].as<bool>();
-      details.selectedDays.clear();
       JsonArray daysArray = doc["selectedDays"];
+      details.selectedDays.clear();
       for (JsonVariant day : daysArray) {
         details.selectedDays.push_back(day.as<String>());
       }
-      details.sensorType = doc["sensor"]["type"].as<String>();
-      details.sensorAddress = strtol(doc["sensor"]["address"].as<const char *>() ?: "0", nullptr, 16);
+      details.daysPerWeekEnabled = doc["daysPerWeekEnabled"].as<bool>();
+      details.trigger = doc["trigger"].as<String>();
+      details.sensorType = doc["sensorType"].as<String>() ?: "";
+      details.sensorAddress = strtol(doc["sensorAddress"].as<const char *>() ?: "0", nullptr, 16);
+      details.sensorCapability = doc["sensorCapability"].as<String>() ?: "";
       if (details.trigger == "Cycle Timer") {
         details.cycleConfig.runSeconds = (doc["runTime"]["hours"].as<int>() * 3600) + (doc["runTime"]["minutes"].as<int>() * 60) + doc["runTime"]["seconds"].as<int>();
         details.cycleConfig.stopSeconds = (doc["stopTime"]["hours"].as<int>() * 3600) + (doc["stopTime"]["minutes"].as<int>() * 60) + doc["stopTime"]["seconds"].as<int>();
         details.cycleConfig.startHigh = doc["startHigh"].as<bool>();
         details.cycleConfig.valid = (details.cycleConfig.runSeconds > 0 && details.cycleConfig.stopSeconds > 0);
-        DEBUG_PRINT(3,"Program %d: Parsed CycleConfig - runSeconds=%d, stopSeconds=%d, startHigh=%d, valid=%d\n",
-                  i, details.cycleConfig.runSeconds, details.cycleConfig.stopSeconds,
-                  details.cycleConfig.startHigh, details.cycleConfig.valid);
+        DEBUG_PRINT(3, "Program %d: Parsed CycleConfig - runSeconds=%d, stopSeconds=%d, startHigh=%d, valid=%d\n",
+                    i, details.cycleConfig.runSeconds, details.cycleConfig.stopSeconds,
+                    details.cycleConfig.startHigh, details.cycleConfig.valid);
       }
-
-      DEBUG_PRINT(2,"Program %d: Loaded, Output=%s, Enabled=%d, Days=[", i, details.output.c_str(), details.enabled);
-      for (const auto &day : details.selectedDays) {
-        Serial.print(day + ",");
-      }
-      Serial.println("]");
-
       if (details.output == "Null" && details.enabled) {
         null_program_ids.push_back(details.id);
-        DEBUG_PRINT(1,"Program %d: Added to null_program_ids\n", i);
+        DEBUG_PRINT(1, "Program %d: Added to null_program_ids\n", i);
       } else {
+        DEBUG_PRINT(3, "Program %d: Loaded, Output=%s, Enabled=%d", i, details.output.c_str(), details.enabled);
         programCache.programs.push_back(details);
       }
     } else {
-      DEBUG_PRINT(1,"Program %d: Failed to acquire LittleFS mutex\n", i);
+      DEBUG_PRINT(1, "Program %d: Failed to acquire LittleFS mutex\n", i);
     }
   }
 
@@ -1431,34 +1434,29 @@ void updateProgramCache() {
         activeProgramA = result.id;
         programCache.outputA.current = result.details;
         programCache.outputA.hasCurrent = true;
-        DEBUG_PRINT(3,"Program %d: Selected as current for Output A, CycleConfig: runSeconds=%d, stopSeconds=%d, startHigh=%d, valid=%d\n",
-                      result.id, programCache.outputA.current.cycleConfig.runSeconds,
-                      programCache.outputA.current.cycleConfig.stopSeconds,
-                      programCache.outputA.current.cycleConfig.startHigh,
-                      programCache.outputA.current.cycleConfig.valid);
       } else if (result.output == "A" && result.id < nextAId) {
         nextAId = result.id;
         programCache.outputA.next = result.details;
         programCache.outputA.hasNext = true;
-        DEBUG_PRINT(1,"Program %d: Selected as next for Output A\n", result.id);
+        DEBUG_PRINT(1, "Program %d: Selected as next for Output A\n", result.id);
       } else if (result.output == "B" && (activeProgramB == -1 || result.id < activeProgramB)) {
         activeProgramB = result.id;
         programCache.outputB.current = result.details;
         programCache.outputB.hasCurrent = true;
-        DEBUG_PRINT(1,"Program %d: Selected as current for Output B\n", result.id);
+        DEBUG_PRINT(1, "Program %d: Selected as current for Output B\n", result.id);
       } else if (result.output == "B" && result.id < nextBId) {
         nextBId = result.id;
         programCache.outputB.next = result.details;
         programCache.outputB.hasNext = true;
-        DEBUG_PRINT(1,"Program %d: Selected as next for Output B\n", result.id);
+        DEBUG_PRINT(1, "Program %d: Selected as next for Output B\n", result.id);
       }
     }
     if (result.nextTransition > now && (nextProgramChange == 0 || result.nextTransition < nextProgramChange)) {
       nextProgramChange = result.nextTransition;
-      DEBUG_PRINT(1,"Program %d: Updated nextProgramChange to %ld\n", result.id, nextProgramChange);
+      DEBUG_PRINT(1, "Program %d: Updated nextProgramChange to %ld\n", result.id, nextProgramChange);
     }
   }
-  DEBUG_PRINT(1,"Program cache updated, nextProgramChange=%ld\n", nextProgramChange);
+  DEBUG_PRINT(1, "Program cache updated, nextProgramChange=%ld\n", nextProgramChange);
 }
 
 void updateOutputs() {
@@ -1567,7 +1565,7 @@ void updateOutputs() {
     DEBUG_PRINT(3, "Output A: Program %d - programCache cycleConfig: runSeconds=%d, stopSeconds=%d, startHigh=%d, valid=%d\n",
                 program.id, program.cycleConfig.runSeconds, program.cycleConfig.stopSeconds,
                 program.cycleConfig.startHigh, program.cycleConfig.valid);
-                /*
+    /*
     // Log current cycleConfigA before assignment
     DEBUG_PRINT(3, "Output A: Before assignment - cycleConfigA: runSeconds=%d, stopSeconds=%d, startHigh=%d, valid=%d\n",
                 cycleConfigA.runSeconds, cycleConfigA.stopSeconds, cycleConfigA.startHigh, cycleConfigA.valid);
@@ -1657,13 +1655,13 @@ void updateOutputs() {
 
 void updateDebugLevel() {
   if (Serial.available() > 0) {
-    String input = Serial.readStringUntil('\n'); // Read until newline
-    input.trim(); // Remove whitespace
+    String input = Serial.readStringUntil('\n');  // Read until newline
+    input.trim();                                 // Remove whitespace
     if (input.length() > 0) {
       int newLevel = input.toInt();
-      if (newLevel >= 0 && newLevel <= 3) { // Validate range
+      if (newLevel >= 0 && newLevel <= 3) {  // Validate range
         debugLevel = newLevel;
-        DEBUG_PRINT(0,"Debug level set to %d\n", debugLevel);
+        DEBUG_PRINT(0, "Debug level set to %d\n", debugLevel);
       } else {
         Serial.println("Invalid debug level. Use 0-3.");
       }
