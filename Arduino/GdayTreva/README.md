@@ -38,3 +38,5 @@
  - 0.2.4: SendSensorStatus function correction.
  - 0.2.5: Semaphore for file access.
  - 0.2.6: Formatting, working on trigger status WS message.
+ DEBUG logging ADDED
+ working on program cache

@@ -95,17 +95,6 @@ int activeProgramA = -1, activeProgramB = -1;
 
 std::vector<int> null_program_ids;
 
-// Enhanced ProgramConfig
-struct ProgramConfig {
-  int id = -1;                // Program ID (1-10, -1 if invalid)
-  String output = "A";        // Output ("A", "B", or "Null")
-  String trigger = "Manual";  // Trigger ("Manual", "Cycle Timer", etc.)
-  bool active = false;        // Whether the program is active
-  String sensorType;          // Associated sensor type
-  uint8_t sensorAddress;      // Associated sensor address
-};
-ProgramConfig programConfigs[11];
-
 // Cycle Timer state
 struct CycleState {
   bool isRunning;
@@ -184,7 +173,7 @@ struct OutputCache {
   bool hasNext;
 };
 
-struct ProgramCache {
+   ProgramCache {
   OutputCache outputA;
   OutputCache outputB;
   std::vector<ProgramDetails> programs;
@@ -499,67 +488,6 @@ void pollActiveSensors() {
   if (sensorDataChanged) {
     DEBUG_PRINT(1,"\nNew Sensor Data.\n");
     //sendSensorStatus();
-  }
-}
-
-// Updates active sensors based on programs and logging
-void updateActiveSensors() {
-  // Clear active flags
-  for (auto &sensor : detectedSensors) {
-    sensor.active = false;
-  }
-
-  // Check programs
-  for (int i = 1; i <= numPrograms; i++) {
-    if (programConfigs[i].active && !programConfigs[i].sensorType.isEmpty()) {
-      for (auto &sensor : detectedSensors) {
-        if (sensor.type == programConfigs[i].sensorType && sensor.address == programConfigs[i].sensorAddress) {
-          sensor.active = true;
-          break;
-        }
-      }
-    }
-  }
-
-  // Check logging configuration
-  if (LittleFS.exists("/logging.json")) {
-    File file = LittleFS.open("/logging.json", FILE_READ);
-    if (file) {
-      StaticJsonDocument<512> doc;
-      if (!deserializeJson(doc, file)) {
-        JsonArray sensors = doc.as<JsonArray>();
-        for (const auto &entry : sensors) {
-          String type = entry["type"].as<String>();
-          String addrStr = entry["address"].as<String>();
-          if (!type.isEmpty() && !addrStr.isEmpty()) {
-            uint8_t address = strtol(addrStr.c_str(), nullptr, 16);
-            for (auto &sensor : detectedSensors) {
-              if (sensor.type == type && sensor.address == address) {
-                sensor.active = true;
-                sensor.loggingEnabled = true;
-                break;
-              }
-            }
-          }
-        }
-      }
-      file.close();
-    }
-  }
-
-  // Rebuild polling queue
-  while (!sensorQueue.empty()) {
-    sensorQueue.pop();
-  }
-  unsigned long currentTime = millis();
-  for (auto &sensor : detectedSensors) {
-    if (sensor.active) {
-      unsigned long nextPollTime = sensor.lastPollTime + sensor.maxPollingInterval;
-      if (nextPollTime < currentTime) {
-        nextPollTime = currentTime;  // Immediate poll if overdue
-      }
-      sensorQueue.push({ &sensor, nextPollTime });
-    }
   }
 }
 
@@ -1004,8 +932,8 @@ void handleSaveProgram(AsyncWebSocketClient *client, const JsonDocument &doc) {
     String sensorType = contentDoc["sensor"]["type"].as<String>();
     String sensorAddrStr = contentDoc["sensor"]["address"].as<String>();
     uint8_t sensorAddress = sensorAddrStr.isEmpty() ? 0 : strtol(sensorAddrStr.c_str(), nullptr, 16);
-    programConfigs[progId].sensorType = sensorType;
-    programConfigs[progId].sensorAddress = sensorAddress;
+    //programConfigs[progId].sensorType = sensorType;
+    //programConfigs[progId].sensorAddress = sensorAddress;
     sendProgramResponse(client, true, "Program saved successfully", targetID.c_str());
     programsChanged = true;
   } else {
@@ -1609,19 +1537,22 @@ void updateOutputs() {
       }
 
       if (programCache.outputA.hasCurrent) {
+        /*
         programConfigs[programCache.outputA.current.id] = { programCache.outputA.current.id, programCache.outputA.current.output,
                                                             programCache.outputA.current.trigger, true, programCache.outputA.current.sensorType,
                                                             programCache.outputA.current.sensorAddress };
         cycleConfigA = programCache.outputA.current.cycleConfig;
+        */
       } else {
         cycleConfigA = { 0, 0, false, false };
         DEBUG_PRINTLN(2, "cycleConfigA SET FALSE");
       }
       if (programCache.outputB.hasCurrent) {
-        programConfigs[programCache.outputB.current.id] = { programCache.outputB.current.id, programCache.outputB.current.output,
+        /*programConfigs[programCache.outputB.current.id] = { programCache.outputB.current.id, programCache.outputB.current.output,
                                                             programCache.outputB.current.trigger, true, programCache.outputB.current.sensorType,
                                                             programCache.outputB.current.sensorAddress };
         cycleConfigB = programCache.outputB.current.cycleConfig;
+        */
       } else {
         cycleConfigB = { 0, 0, false, false };
       }
@@ -1631,6 +1562,25 @@ void updateOutputs() {
   // Handle Output A
   if (programCache.outputA.hasCurrent) {
     const auto &program = programCache.outputA.current;
+
+    // Log programCache.outputA.current.cycleConfig before assignment
+    DEBUG_PRINT(3, "Output A: Program %d - programCache cycleConfig: runSeconds=%d, stopSeconds=%d, startHigh=%d, valid=%d\n",
+                program.id, program.cycleConfig.runSeconds, program.cycleConfig.stopSeconds,
+                program.cycleConfig.startHigh, program.cycleConfig.valid);
+                /*
+    // Log current cycleConfigA before assignment
+    DEBUG_PRINT(3, "Output A: Before assignment - cycleConfigA: runSeconds=%d, stopSeconds=%d, startHigh=%d, valid=%d\n",
+                cycleConfigA.runSeconds, cycleConfigA.stopSeconds, cycleConfigA.startHigh, cycleConfigA.valid);
+    // Assign cycleConfigA
+    programConfigs[programCache.outputA.current.id] = { programCache.outputA.current.id, programCache.outputA.current.output,
+                                                        programCache.outputA.current.trigger, true, programCache.outputA.current.sensorType,
+                                                        programCache.outputA.current.sensorAddress };
+    cycleConfigA = programCache.outputA.current.cycleConfig;
+    // Log cycleConfigA after assignment
+    DEBUG_PRINT(3, "Output A: After assignment - cycleConfigA: runSeconds=%d, stopSeconds=%d, startHigh=%d, valid=%d\n",
+                cycleConfigA.runSeconds, cycleConfigA.stopSeconds, cycleConfigA.startHigh, cycleConfigA.valid);
+    // Existing debug statement
+    */
     DEBUG_PRINT(2, "Output A: Active program %d, Trigger=%s, Valid=%d\n",
                 programCache.outputA.current.id, programCache.outputA.current.trigger.c_str(),
                 cycleConfigA.valid);
@@ -1693,7 +1643,7 @@ void updateOutputs() {
     triggerInfo.push_back(info);
   }
   for (int id : null_program_ids) {
-    triggerInfo.push_back({ id, "Null", programConfigs[id].trigger, 0, "", false });
+    //triggerInfo.push_back({ id, "Null", programConfigs[id].trigger, 0, "", false });
   }
   if (triggerInfo != last_trigger_info) {
     sendTriggerStatus(triggerInfo);
