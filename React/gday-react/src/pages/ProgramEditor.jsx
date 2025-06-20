@@ -20,8 +20,9 @@ function ProgramEditor({ wsRef, isWsReady, programs, sensors }) {
   const [selectedDays, setSelectedDays] = useState([]);
   const [daysPerWeekEnabled, setDaysPerWeekEnabled] = useState(true);
   const [triggerType, setTriggerType] = useState('Manual');
-  const [triggerAddress, setTriggerAddress] = useState('');
-  const [triggerCapability, setTriggerCapability] = useState('');
+  const [sensorType, setSensorType] = useState('');
+  const [sensorAddress, setSensorAddress] = useState('');
+  const [sensorCapability, setSensorCapability] = useState('');
   const [runTime, setRunTime] = useState({ seconds: '', minutes: '', hours: '' });
   const [stopTime, setStopTime] = useState({ seconds: '', minutes: '', hours: '' });
   const [startHigh, setStartHigh] = useState(true);
@@ -48,7 +49,7 @@ function ProgramEditor({ wsRef, isWsReady, programs, sensors }) {
   ];
   const sensorTriggers = sensors.flatMap((sensor) =>
     (sensor.capabilities || []).map((capability) => ({
-      value: `${sensor.type}_${sensor.address}_${capability}`,
+      value: `Sensor_${sensor.type}_${sensor.address}_${capability}`,
       label: `${sensor.type} ${sensor.address} - ${capability}`,
     }))
   );
@@ -81,25 +82,23 @@ function ProgramEditor({ wsRef, isWsReady, programs, sensors }) {
           setEndTimeEnabled(program.endTimeEnabled !== false);
           setSelectedDays(program.selectedDays || []);
           setDaysPerWeekEnabled(program.daysPerWeekEnabled !== false);
-          if (program.triggerType) {
-            setTriggerType(program.triggerType);
-            setTriggerAddress(program.triggerAddress || '');
-            setTriggerCapability(program.triggerCapability || '');
-          } else if (program.trigger) {
+          if (program.trigger) {
             if (program.trigger === 'Manual' || program.trigger === 'Cycle Timer') {
               setTriggerType(program.trigger);
-              setTriggerAddress('');
-              setTriggerCapability('');
-            } else {
-              const [type, address, capability] = program.trigger.split('_');
-              setTriggerType(type || 'Manual');
-              setTriggerAddress(address || '');
-              setTriggerCapability(capability || '');
+              setSensorType('');
+              setSensorAddress('');
+              setSensorCapability('');
+            } else if (program.trigger === 'Sensor') {
+              setTriggerType('Sensor');
+              setSensorType(program.sensorType || '');
+              setSensorAddress(program.sensorAddress || '');
+              setSensorCapability(program.sensorCapability || '');
             }
           } else {
             setTriggerType('Manual');
-            setTriggerAddress('');
-            setTriggerCapability('');
+            setSensorType('');
+            setSensorAddress('');
+            setSensorCapability('');
           }
           setRunTime({
             seconds: program.runTime?.seconds?.toString() || '',
@@ -226,10 +225,10 @@ function ProgramEditor({ wsRef, isWsReady, programs, sensors }) {
       endTimeEnabled: isMonitorOnly ? false : endTimeEnabled,
       selectedDays: isMonitorOnly ? [] : daysPerWeekEnabled ? selectedDays : [],
       daysPerWeekEnabled: isMonitorOnly ? false : daysPerWeekEnabled,
-      trigger: triggerType === 'Manual' || triggerType === 'Cycle Timer' ? triggerType : undefined,
-      triggerType: triggerType !== 'Manual' && triggerType !== 'Cycle Timer' ? triggerType : undefined,
-      triggerAddress: triggerType !== 'Manual' && triggerType !== 'Cycle Timer' ? triggerAddress : undefined,
-      triggerCapability: triggerType !== 'Manual' && triggerType !== 'Cycle Timer' ? triggerCapability : undefined,
+      trigger: triggerType,
+      sensorType: triggerType === 'Sensor' ? sensorType : undefined,
+      sensorAddress: triggerType === 'Sensor' ? sensorAddress : undefined,
+      sensorCapability: triggerType === 'Sensor' ? sensorCapability : undefined,
       ...(triggerType === 'Cycle Timer' && !isMonitorOnly && {
         runTime: {
           seconds: parseInt(runTime.seconds) || 0,
@@ -313,19 +312,10 @@ function ProgramEditor({ wsRef, isWsReady, programs, sensors }) {
         setEndTimeEnabled(content.endTimeEnabled !== false);
         setSelectedDays(content.selectedDays || []);
         setDaysPerWeekEnabled(content.daysPerWeekEnabled !== false);
-        if (content.trigger) {
-          setTriggerType(content.trigger);
-          setTriggerAddress('');
-          setTriggerCapability('');
-        } else if (content.triggerType) {
-          setTriggerType(content.triggerType);
-          setTriggerAddress(content.triggerAddress || '');
-          setTriggerCapability(content.triggerCapability || '');
-        } else {
-          setTriggerType('Manual');
-          setTriggerAddress('');
-          setTriggerCapability('');
-        }
+        setTriggerType(content.trigger || 'Manual');
+        setSensorType(content.sensorType || '');
+        setSensorAddress(content.sensorAddress || '');
+        setSensorCapability(content.sensorCapability || '');
         setRunTime({
           seconds: content.runTime?.seconds?.toString() || '',
           minutes: content.runTime?.minutes?.toString() || '',
@@ -368,10 +358,10 @@ function ProgramEditor({ wsRef, isWsReady, programs, sensors }) {
       endTimeEnabled: isMonitorOnly ? false : endTimeEnabled,
       selectedDays: isMonitorOnly ? [] : daysPerWeekEnabled ? selectedDays : [],
       daysPerWeekEnabled: isMonitorOnly ? false : daysPerWeekEnabled,
-      trigger: triggerType === 'Manual' || triggerType === 'Cycle Timer' ? triggerType : undefined,
-      triggerType: triggerType !== 'Manual' && triggerType !== 'Cycle Timer' ? triggerType : undefined,
-      triggerAddress: triggerType !== 'Manual' && triggerType !== 'Cycle Timer' ? triggerAddress : undefined,
-      triggerCapability: triggerType !== 'Manual' && triggerType !== 'Cycle Timer' ? triggerCapability : undefined,
+      trigger: triggerType,
+      sensorType: triggerType === 'Sensor' ? sensorType : undefined,
+      sensorAddress: triggerType === 'Sensor' ? sensorAddress : undefined,
+      sensorCapability: triggerType === 'Sensor' ? sensorCapability : undefined,
       ...(triggerType === 'Cycle Timer' && !isMonitorOnly && {
         runTime: {
           seconds: parseInt(runTime.seconds) || 0,
@@ -409,13 +399,15 @@ function ProgramEditor({ wsRef, isWsReady, programs, sensors }) {
     const value = e.target.value;
     if (value === 'Manual' || value === 'Cycle Timer') {
       setTriggerType(value);
-      setTriggerAddress('');
-      setTriggerCapability('');
+      setSensorType('');
+      setSensorAddress('');
+      setSensorCapability('');
     } else {
-      const [type, address, capability] = value.split('_');
-      setTriggerType(type);
-      setTriggerAddress(address || '');
-      setTriggerCapability(capability || '');
+      const [, type, address, capability] = value.split('_');
+      setTriggerType('Sensor');
+      setSensorType(type);
+      setSensorAddress(address);
+      setSensorCapability(capability);
     }
   };
 
@@ -462,14 +454,16 @@ function ProgramEditor({ wsRef, isWsReady, programs, sensors }) {
               setIsMonitorOnly(e.target.checked);
               if (e.target.checked) {
                 setOutput('null');
-                setTriggerType(sensorTriggers[0]?.value.split('_')[0] || 'Manual');
-                setTriggerAddress(sensorTriggers[0]?.value.split('_')[1] || '');
-                setTriggerCapability(sensorTriggers[0]?.value.split('_')[2] || '');
+                setTriggerType('Sensor');
+                setSensorType(sensorTriggers[0]?.value.split('_')[1] || '');
+                setSensorAddress(sensorTriggers[0]?.value.split('_')[2] || '');
+                setSensorCapability(sensorTriggers[0]?.value.split('_')[3] || '');
               } else {
                 setOutput('A');
                 setTriggerType('Manual');
-                setTriggerAddress('');
-                setTriggerCapability('');
+                setSensorType('');
+                setSensorAddress('');
+                setSensorCapability('');
               }
             }}
           />
@@ -637,7 +631,7 @@ function ProgramEditor({ wsRef, isWsReady, programs, sensors }) {
         <label htmlFor="trigger">Trigger:</label>
         <select
           id="trigger"
-          value={triggerType === 'Manual' || triggerType === 'Cycle Timer' ? triggerType : `${triggerType}_${triggerAddress}_${triggerCapability}`}
+          value={triggerType === 'Manual' || triggerType === 'Cycle Timer' ? triggerType : `Sensor_${sensorType}_${sensorAddress}_${sensorCapability}`}
           onChange={handleTriggerChange}
           className="input-field"
         >
@@ -744,9 +738,7 @@ function ProgramEditor({ wsRef, isWsReady, programs, sensors }) {
           </div>
         ) : (
           <div className="manual-message">
-            {triggerType === 'Manual' && (
-              'Manually powered on'
-            )}
+            {triggerType === 'Manual' && 'Manually powered on'}
           </div>
         )}
       </div>
@@ -784,9 +776,9 @@ ProgramEditor.propTypes = {
       selectedDays: PropTypes.arrayOf(PropTypes.string),
       daysPerWeekEnabled: PropTypes.bool,
       trigger: PropTypes.string,
-      triggerType: PropTypes.string,
-      triggerAddress: PropTypes.string,
-      triggerCapability: PropTypes.string,
+      sensorType: PropTypes.string,
+      sensorAddress: PropTypes.string,
+      sensorCapability: PropTypes.string,
       runTime: PropTypes.shape({
         seconds: PropTypes.oneOfType([PropTypes.number, PropTypes.string]),
         minutes: PropTypes.oneOfType([PropTypes.number, PropTypes.string]),
