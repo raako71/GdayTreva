@@ -22,9 +22,12 @@
   do { \
     if (debugLevel >= level) Serial.printf(__VA_ARGS__); \
   } while (0)
-#define DEBUG_PRINTLN(level, str) \
+#define DEBUG_PRINTLN(level, ...) \
   do { \
-    if (debugLevel >= level) Serial.println(str); \
+    if (debugLevel >= level) { \
+      Serial.printf(__VA_ARGS__); \
+      Serial.println(); \
+    } \
   } while (0)
 
 SemaphoreHandle_t littlefsMutex = NULL;
@@ -79,6 +82,8 @@ std::vector<SensorInfo> detectedSensors;
 std::priority_queue<SensorPoll> sensorQueue;
 std::vector<String> logBuffer;
 unsigned long lastLogWrite = 0;
+time_t nextTransA, nextTransB;
+int activeProgramA = -1, activeProgramB = -1;
 
 struct Config {
   char ssid[32];
@@ -97,7 +102,7 @@ struct CycleConfig {
   bool valid = false;
 };
 CycleConfig cycleConfigA, cycleConfigB;
-int activeProgramA = -1, activeProgramB = -1;
+
 
 std::vector<int> null_program_ids;
 
@@ -149,6 +154,11 @@ std::vector<TriggerInfo> last_trigger_info;
 
 bool sensorsChanged = false;
 
+struct PriorityResult {
+  bool isActive;
+  time_t nextTransition;
+};
+
 // Program scheduling structs
 struct ProgramDetails {
   int id;
@@ -164,29 +174,8 @@ struct ProgramDetails {
   CycleConfig cycleConfig;
 };
 
-struct PriorityResult {
-  bool isActive;
-  int id;
-  String output;
-  time_t nextTransition;
-  ProgramDetails details;
-};
+std::vector<ProgramDetails> ProgramCache;
 
-struct OutputCache {
-  ProgramDetails current;
-  ProgramDetails next;
-  bool hasCurrent;
-  bool hasNext;
-};
-
-ProgramCache {
-  OutputCache outputA;
-  OutputCache outputB;
-  std::vector<ProgramDetails> programs;
-};
-
-ProgramCache programCache;
-time_t nextProgramChange = 0;
 
 // I2C Scanner function
 void scanI2CSensors() {
@@ -934,14 +923,9 @@ void handleSaveProgram(AsyncWebSocketClient *client, const JsonDocument &doc) {
 
     file.close();
     xSemaphoreGive(littlefsMutex);
-    int progId = targetID.toInt();
-    String sensorType = contentDoc["sensor"]["type"].as<String>();
-    String sensorAddrStr = contentDoc["sensor"]["address"].as<String>();
-    uint8_t sensorAddress = sensorAddrStr.isEmpty() ? 0 : strtol(sensorAddrStr.c_str(), nullptr, 16);
-    //programConfigs[progId].sensorType = sensorType;
-    //programConfigs[progId].sensorAddress = sensorAddress;
     sendProgramResponse(client, true, "Program saved successfully", targetID.c_str());
-    programsChanged = true;
+    time_t now = getAdjustedTime();
+    updateProgramCache();
   } else {
     sendProgramResponse(client, false, "Failed to acquire filesystem lock", targetID.c_str());
   }
@@ -1257,9 +1241,9 @@ std::pair<bool, bool> runCycleTimer(const char *output, CycleState &state, const
   return { state.isOnPhase, state.nextToggle };
 }
 
-
+//determine active status and next transition for a program.
 PriorityResult determineProgramPriority(const ProgramDetails &prog, time_t now) {
-  PriorityResult result = { false, prog.id, prog.output, 0, prog };
+  PriorityResult result = { false, -1 };
   if (!prog.enabled) {
     DEBUG_PRINT(3, "Program %d: Disabled\n", prog.id);
     return result;
@@ -1267,96 +1251,150 @@ PriorityResult determineProgramPriority(const ProgramDetails &prog, time_t now) 
 
   struct tm timeinfo;
   localtime_r(&now, &timeinfo);
-  time_t startEpoch = 0, endEpoch = LONG_MAX;
+  time_t startEpoch = -1, endEpoch = LONG_MAX;
 
-  // Handle start/end dates
+  bool activeNow = 1;
+  // start date
   if (prog.startDateEnabled && !prog.startDate.isEmpty()) {
     startEpoch = parseISO8601(prog.startDate.c_str());
+    DEBUG_PRINTLN(3, "Program %d: startEpoch = %ld", prog.id, startEpoch);
     if (now < startEpoch) {
-      result.nextTransition = startEpoch;
+      activeNow = 0;
     }
   }
+  // end date
   if (prog.endDateEnabled && !prog.endDate.isEmpty()) {
     endEpoch = parseISO8601(prog.endDate.c_str());
-    if (endEpoch > now && (result.nextTransition == 0) {
-      result.nextTransition = endEpoch;
+    DEBUG_PRINTLN(3, "Program %d: endEpoch = %ld", prog.id, endEpoch);
+    if (now >= endEpoch) {
+      DEBUG_PRINT(3, "Program %d: expired\n", prog.id);
+      return result;
     }
   }
 
-  // Handle start/end times
-  int startHour = 0, startMinute = 0, endHour = 23, endMinute = 59;
-  if (prog.startTimeEnabled && prog.endTimeEnabled && !prog.startTime.isEmpty() && !prog.endTime.isEmpty()) {
+  // Handle start time
+  int startHour = 0, startMinute = 0;
+  if (prog.startTimeEnabled && !prog.startTime.isEmpty()) {
     sscanf(prog.startTime.c_str(), "%d:%d", &startHour, &startMinute);
+    struct tm startTime = timeinfo;  // Copy current day's timeinfo
+    startTime.tm_hour = startHour;
+    startTime.tm_min = startMinute;
+    startTime.tm_sec = 0;
+    time_t startTimeEpoch = mktime(&startTime);
+    if (now < startTimeEpoch) {
+      activeNow = 0;
+      if (startTimeEpoch < startEpoch && startEpoch > 0) startEpoch = startTimeEpoch;
+    }
+  }
+  // Handle end time
+  int endHour = 23, endMinute = 59;
+  if (prog.endTimeEnabled && !prog.endTime.isEmpty()) {
     sscanf(prog.endTime.c_str(), "%d:%d", &endHour, &endMinute);
-    DEBUG_PRINT(1, "Program %d: Start time %02d:%02d, End time %02d:%02d\n", prog.id, startHour, startMinute, endHour, endMinute);
+    struct tm endTime = timeinfo;  // Copy current day's timeinfo
+    endTime.tm_hour = endHour;
+    endTime.tm_min = endMinute;
+    endTime.tm_sec = 0;
+    time_t endTimeEpoch = mktime(&endTime);
+    if (now >= endTimeEpoch) {
+      DEBUG_PRINT(3, "Program %d: expired\n", prog.id);
+      return result;
+    } else if (endTimeEpoch < endEpoch && endEpoch > 0) endEpoch = endTimeEpoch;
   }
 
   // Handle days of the week
-  bool dayValid = !prog.daysPerWeekEnabled || prog.selectedDays.empty();
-  time_t nextDayTransition = 0;
-  if (prog.daysPerWeekEnabled && !prog.selectedDays.empty()) {
-    const char *days[] = { "Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday" };
-    int currentDay = timeinfo.tm_wday;
-    int daysToNext = 7;
-    for (const auto &day : prog.selectedDays) {
-      for (int i = 0; i < 7; i++) {
-        if (day == days[i]) {
-          int daysDiff = (i - currentDay + 7) % 7;
-          if (daysDiff == 0 && timeinfo.tm_hour * 60 + timeinfo.tm_min <= endHour * 60 + endMinute) {
-            dayValid = true;
-          }
-          if (daysDiff > 0 && daysDiff < daysToNext) {
-            daysToNext = daysDiff;
+  if (prog.daysPerWeekEnabled) {
+    if (!prog.selectedDays.empty()) {
+      const char *days[] = { "Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday" };
+      int currentDay = timeinfo.tm_wday;
+      if (std::find(prog.selectedDays.begin(), prog.selectedDays.end(), days[currentDay]) == prog.selectedDays.end()) {
+        DEBUG_PRINT(3, "Today inactive for Program %d\n", prog.id);
+        // Find the next active day
+        int nextDayIndex = -1;
+        for (int i = 1; i <= 7; i++) {
+          int checkDay = (currentDay + i) % 7;  // Cycle through days of the week
+          if (std::find(prog.selectedDays.begin(), prog.selectedDays.end(), days[checkDay]) != prog.selectedDays.end()) {
+            nextDayIndex = checkDay;
+            break;
           }
         }
+        if (nextDayIndex != -1) {
+          // Calculate time_t for 00:00 of the next active day
+          struct tm nextDayTm = timeinfo;  // Copy current timeinfo
+          nextDayTm.tm_hour = 0;
+          nextDayTm.tm_min = 0;
+          nextDayTm.tm_sec = 0;
+          int daysToAdd = (nextDayIndex - currentDay + 7) % 7;  // Days until next active day
+          if (daysToAdd == 0) daysToAdd = 7;                    // If same day, schedule for next week
+          nextDayTm.tm_mday += daysToAdd;
+          mktime(&nextDayTm);               // Normalize the time structure
+          startEpoch = mktime(&nextDayTm);  // Convert to epoch time
+        }
+        result.nextTransition = startEpoch;
+        return result;
       }
-    }
-    if (daysToNext < 7) {
-      nextDayTransition = now + (daysToNext * 24 * 3600);
-      nextDayTransition -= (timeinfo.tm_hour * 3600 + timeinfo.tm_min * 60 + timeinfo.tm_sec);
-      if (nextDayTransition > now && (result.nextTransition == 0 || nextDayTransition < result.nextTransition)) {
-        result.nextTransition = nextDayTransition;
-      }
-    }
-    DEBUG_PRINT(1, "Program %d: Day valid=%d, Next day transition=%ld\n", prog.id, dayValid, nextDayTransition);
-  } else {
-    dayValid = true;
-  }
-
-  // Calculate daily start/end epochs if day is valid
-  if (dayValid) {
-    time_t todayStart = now - (timeinfo.tm_hour * 3600 + timeinfo.tm_min * 60 + timeinfo.tm_sec);
-    time_t dailyStart = todayStart + (startHour * 3600 + startMinute * 60);
-    time_t dailyEnd = todayStart + (endHour * 3600 + endMinute * 60);
-    if (dailyStart <= now && now <= dailyEnd && startEpoch <= now && now <= endEpoch) {
-      result.isActive = true;
-    }
-    if (dailyStart > now && (result.nextTransition == 0 || dailyStart < result.nextTransition)) {
-      result.nextTransition = dailyStart;
-    }
-    if (dailyEnd > now && (result.nextTransition == 0 || dailyEnd < result.nextTransition)) {
-      result.nextTransition = dailyEnd;
-    }
-    time_t nextDayStart = dailyStart + 24 * 3600;
-    if (nextDayStart <= endEpoch && nextDayStart > now && (result.nextTransition == 0 || nextDayStart < result.nextTransition)) {
-      result.nextTransition = nextDayStart;
+    } else {
+      DEBUG_PRINT(3, "No active days for Program %d\n", prog.id);
+      return result;
     }
   }
-  static long double lastSend = 0;
-  if (lastSend != result.nextTransition) {
+  if (activeNow) {
+    result = { true, endEpoch };
     DEBUG_PRINT(1, "Program %d: Active=%d, Next transition=%ld\n", prog.id, result.isActive, result.nextTransition);
-    lastSend = result.nextTransition;
+    return result;
+  } else {
+    result = { false, startEpoch };
+    DEBUG_PRINT(1, "Program %d: Active=%d, Next transition=%ld\n", prog.id, result.isActive, result.nextTransition);
+    return result;
   }
-  return result;
 }
 
+//set active programs and transition times.
+void setProgramPriorities(time_t now) {
+  activeProgramA = -1;
+  activeProgramB = -1;
+  nextTransA = LONG_MAX;
+  nextTransB = LONG_MAX;
+
+  for (const auto &prog : ProgramCache) {
+    if (!prog.enabled && prog.output != "null") {
+      continue;
+    }
+
+    PriorityResult result = determineProgramPriority(prog, now);
+
+    // Handle active programs (lowest ID for each output)
+    if (result.isActive) {
+      if (prog.output == "A" && (activeProgramA == -1 || prog.id < activeProgramA)) {
+        activeProgramA = prog.id;
+        //DEBUG_PRINT(3, "Program %d: Set as activeProgramA\n", prog.id);
+      } else if (prog.output == "B" && (activeProgramB == -1 || prog.id < activeProgramB)) {
+        activeProgramB = prog.id;
+        //DEBUG_PRINT(3, "Program %d: Set as activeProgramB\n", prog.id);
+      }
+    }
+
+    // Handle next transition (earliest epoch for each output)
+    if (result.nextTransition >= 0) {
+      if (prog.output == "A" && result.nextTransition < nextTransA) {
+        nextTransA = result.nextTransition;
+        //DEBUG_PRINT(3, "Program %d: Updated nextTransA to %ld\n", prog.id, nextTransA);
+      } else if (prog.output == "B" && result.nextTransition < nextTransB) {
+        nextTransB = result.nextTransition;
+        //DEBUG_PRINT(3, "Program %d: Updated nextTransB to %ld\n", prog.id, nextTransB);
+      }
+    }
+  }
+
+  DEBUG_PRINT(1, "Programs set: activeProgramA=%d, activeProgramB=%d, nextTransA=%ld, nextTransB=%ld\n",
+              activeProgramA, activeProgramB, nextTransA, nextTransB);
+}
+
+//update program cache from flash.
 void updateProgramCache() {
   DEBUG_PRINTLN(1, "Updating program cache...");
-  programCache.programs.clear();
+  ProgramCache.clear();
   null_program_ids.clear();
-  programCache.outputA = { ProgramDetails{}, ProgramDetails{}, false, false };
-  programCache.outputB = { ProgramDetails{}, ProgramDetails{}, false, false };
-  nextProgramChange = 0;
+
   time_t now = getAdjustedTime();
 
   for (int i = 1; i <= numPrograms; i++) {
@@ -1404,6 +1442,7 @@ void updateProgramCache() {
       details.sensorType = doc["sensorType"].as<String>() ?: "";
       details.sensorAddress = strtol(doc["sensorAddress"].as<const char *>() ?: "0", nullptr, 16);
       details.sensorCapability = doc["sensorCapability"].as<String>() ?: "";
+      details.cycleConfig = { 0, 0, false, false };  // Default initialization
       if (details.trigger == "Cycle Timer") {
         details.cycleConfig.runSeconds = (doc["runTime"]["hours"].as<int>() * 3600) + (doc["runTime"]["minutes"].as<int>() * 60) + doc["runTime"]["seconds"].as<int>();
         details.cycleConfig.stopSeconds = (doc["stopTime"]["hours"].as<int>() * 3600) + (doc["stopTime"]["minutes"].as<int>() * 60) + doc["stopTime"]["seconds"].as<int>();
@@ -1413,244 +1452,23 @@ void updateProgramCache() {
                     i, details.cycleConfig.runSeconds, details.cycleConfig.stopSeconds,
                     details.cycleConfig.startHigh, details.cycleConfig.valid);
       }
-      if (details.output == "Null" && details.enabled) {
+      if (details.output.equalsIgnoreCase("null") && details.enabled) {
         null_program_ids.push_back(details.id);
         DEBUG_PRINT(1, "Program %d: Added to null_program_ids\n", i);
       } else {
-        DEBUG_PRINT(3, "Program %d: Loaded, Output=%s, Enabled=%d", i, details.output.c_str(), details.enabled);
-        programCache.programs.push_back(details);
+        DEBUG_PRINT(3, "Program %d: Loaded, Output=%s, Enabled=%d\n", i, details.output.c_str(), details.enabled);
+        ProgramCache.push_back(details);
       }
     } else {
       DEBUG_PRINT(1, "Program %d: Failed to acquire LittleFS mutex\n", i);
     }
   }
-
-  // Update current and next programs
-  int nextAId = numPrograms + 1, nextBId = numPrograms + 1;
-  for (const auto &prog : programCache.programs) {
-    PriorityResult result = determineProgramPriority(prog, now);
-    if (result.isActive) {
-      if (result.output == "A" && (activeProgramA == -1 || result.id < activeProgramA)) {
-        activeProgramA = result.id;
-        programCache.outputA.current = result.details;
-        programCache.outputA.hasCurrent = true;
-      } else if (result.output == "A" && result.id < nextAId) {
-        nextAId = result.id;
-        programCache.outputA.next = result.details;
-        programCache.outputA.hasNext = true;
-        DEBUG_PRINT(1, "Program %d: Selected as next for Output A\n", result.id);
-      } else if (result.output == "B" && (activeProgramB == -1 || result.id < activeProgramB)) {
-        activeProgramB = result.id;
-        programCache.outputB.current = result.details;
-        programCache.outputB.hasCurrent = true;
-        DEBUG_PRINT(1, "Program %d: Selected as current for Output B\n", result.id);
-      } else if (result.output == "B" && result.id < nextBId) {
-        nextBId = result.id;
-        programCache.outputB.next = result.details;
-        programCache.outputB.hasNext = true;
-        DEBUG_PRINT(1, "Program %d: Selected as next for Output B\n", result.id);
-      }
-    }
-    if (result.nextTransition > now && (nextProgramChange == 0 || result.nextTransition < nextProgramChange)) {
-      nextProgramChange = result.nextTransition;
-      DEBUG_PRINT(1, "Program %d: Updated nextProgramChange to %ld\n", result.id, nextProgramChange);
-    }
-  }
-  DEBUG_PRINT(1, "Program cache updated, nextProgramChange=%ld\n", nextProgramChange);
+  DEBUG_PRINTLN(1, "Program cache updated.");
+  setProgramPriorities(now);
 }
 
 void updateOutputs() {
-  time_t currentTime = getAdjustedTime();
-  if (currentTime < 946684800) {  // Epoch before 2000
-    digitalWrite(OUTPUT_A_PIN, LOW);
-    digitalWrite(OUTPUT_B_PIN, LOW);
-    outputAState = outputBState = false;
-    return;
-    Serial.print("TIME NOT SET");
-  }
-
-  bool needsReevaluation = programsChanged || (nextProgramChange != 0 && currentTime >= nextProgramChange) || (programCache.outputA.hasCurrent && !determineProgramPriority(programCache.outputA.current, currentTime).isActive) || (programCache.outputB.hasCurrent && !determineProgramPriority(programCache.outputB.current, currentTime).isActive);
-
-  if (needsReevaluation) {
-    if (programsChanged) {
-      updateProgramCache();
-      programsChanged = false;
-    } else {
-      if (programCache.outputA.hasCurrent && !determineProgramPriority(programCache.outputA.current, currentTime).isActive) {
-        activeProgramA = -1;
-        programCache.outputA.hasCurrent = false;
-        cycleStateA = { false, 0, false, -1, 0 };
-      }
-      if (programCache.outputB.hasCurrent && !determineProgramPriority(programCache.outputB.current, currentTime).isActive) {
-        activeProgramB = -1;
-        programCache.outputB.hasCurrent = false;
-        cycleStateB = { false, 0, false, -1, 0 };
-      }
-
-      if (!programCache.outputA.hasCurrent && programCache.outputA.hasNext && determineProgramPriority(programCache.outputA.next, currentTime).isActive) {
-        activeProgramA = programCache.outputA.next.id;
-        programCache.outputA.current = programCache.outputA.next;
-        programCache.outputA.hasCurrent = true;
-        programCache.outputA.hasNext = false;
-      }
-      if (!programCache.outputB.hasCurrent && programCache.outputB.hasNext && determineProgramPriority(programCache.outputB.next, currentTime).isActive) {
-        activeProgramB = programCache.outputB.next.id;
-        programCache.outputB.current = programCache.outputB.next;
-        programCache.outputB.hasCurrent = true;
-        programCache.outputB.hasNext = false;
-      }
-
-      if (!programCache.outputA.hasCurrent || !programCache.outputB.hasCurrent) {
-        int nextAId = numPrograms + 1, nextBId = numPrograms + 1;
-        programCache.outputA.hasNext = programCache.outputB.hasNext = false;
-        nextProgramChange = 0;
-
-        for (const auto &program : programCache.programs) {
-          PriorityResult result = determineProgramPriority(program, currentTime);
-          if (result.isActive) {
-            if (result.output == "A" && !programCache.outputA.hasCurrent && result.id < nextAId) {
-              activeProgramA = result.id;
-              programCache.outputA.current = result.details;
-              programCache.outputA.hasCurrent = true;
-              nextAId = result.id;
-            } else if (result.output == "A" && result.id < nextAId) {
-              programCache.outputA.next = result.details;
-              programCache.outputA.hasNext = true;
-              nextAId = result.id;
-            } else if (result.output == "B" && !programCache.outputB.hasCurrent && result.id < nextBId) {
-              activeProgramB = result.id;
-              programCache.outputB.current = result.details;
-              programCache.outputB.hasCurrent = true;
-              nextBId = result.id;
-            } else if (result.output == "B" && result.id < nextBId) {
-              programCache.outputB.next = result.details;
-              programCache.outputB.hasNext = true;
-              nextBId = result.id;
-            }
-          }
-          if (result.nextTransition > currentTime && (nextProgramChange == 0 || result.nextTransition < nextProgramChange)) {
-            nextProgramChange = result.nextTransition;
-          }
-        }
-      }
-
-      if (programCache.outputA.hasCurrent) {
-        /*
-        programConfigs[programCache.outputA.current.id] = { programCache.outputA.current.id, programCache.outputA.current.output,
-                                                            programCache.outputA.current.trigger, true, programCache.outputA.current.sensorType,
-                                                            programCache.outputA.current.sensorAddress };
-        cycleConfigA = programCache.outputA.current.cycleConfig;
-        */
-      } else {
-        cycleConfigA = { 0, 0, false, false };
-        DEBUG_PRINTLN(2, "cycleConfigA SET FALSE");
-      }
-      if (programCache.outputB.hasCurrent) {
-        /*programConfigs[programCache.outputB.current.id] = { programCache.outputB.current.id, programCache.outputB.current.output,
-                                                            programCache.outputB.current.trigger, true, programCache.outputB.current.sensorType,
-                                                            programCache.outputB.current.sensorAddress };
-        cycleConfigB = programCache.outputB.current.cycleConfig;
-        */
-      } else {
-        cycleConfigB = { 0, 0, false, false };
-      }
-    }
-  }
-
-  // Handle Output A
-  if (programCache.outputA.hasCurrent) {
-    const auto &program = programCache.outputA.current;
-
-    // Log programCache.outputA.current.cycleConfig before assignment
-    DEBUG_PRINT(3, "Output A: Program %d - programCache cycleConfig: runSeconds=%d, stopSeconds=%d, startHigh=%d, valid=%d\n",
-                program.id, program.cycleConfig.runSeconds, program.cycleConfig.stopSeconds,
-                program.cycleConfig.startHigh, program.cycleConfig.valid);
-    /*
-    // Log current cycleConfigA before assignment
-    DEBUG_PRINT(3, "Output A: Before assignment - cycleConfigA: runSeconds=%d, stopSeconds=%d, startHigh=%d, valid=%d\n",
-                cycleConfigA.runSeconds, cycleConfigA.stopSeconds, cycleConfigA.startHigh, cycleConfigA.valid);
-    // Assign cycleConfigA
-    programConfigs[programCache.outputA.current.id] = { programCache.outputA.current.id, programCache.outputA.current.output,
-                                                        programCache.outputA.current.trigger, true, programCache.outputA.current.sensorType,
-                                                        programCache.outputA.current.sensorAddress };
-    cycleConfigA = programCache.outputA.current.cycleConfig;
-    // Log cycleConfigA after assignment
-    DEBUG_PRINT(3, "Output A: After assignment - cycleConfigA: runSeconds=%d, stopSeconds=%d, startHigh=%d, valid=%d\n",
-                cycleConfigA.runSeconds, cycleConfigA.stopSeconds, cycleConfigA.startHigh, cycleConfigA.valid);
-    // Existing debug statement
-    */
-    DEBUG_PRINT(2, "Output A: Active program %d, Trigger=%s, Valid=%d\n",
-                programCache.outputA.current.id, programCache.outputA.current.trigger.c_str(),
-                cycleConfigA.valid);
-    if (program.trigger == "Manual") {
-      outputAState = program.enabled;
-      digitalWrite(OUTPUT_A_PIN, outputAState ? HIGH : LOW);
-      cycleStateA = { false, 0, false, program.id, 0 };
-    } else if (program.trigger == "Cycle Timer") {
-      auto [state, nextToggle] = runCycleTimer("A", cycleStateA, cycleConfigA);
-      outputAState = state;
-      digitalWrite(OUTPUT_A_PIN, outputAState ? HIGH : LOW);
-      cycleStateA.activeProgram = program.id;
-      cycleStateA.nextToggle = nextToggle;
-    } else {
-      outputAState = false;
-      digitalWrite(OUTPUT_A_PIN, LOW);
-      cycleStateA = { false, 0, false, -1, 0 };
-    }
-  } else {
-    outputAState = false;
-    digitalWrite(OUTPUT_A_PIN, LOW);
-    cycleStateA = { false, 0, false, -1, 0 };
-  }
-
-  // Handle Output B
-  if (programCache.outputB.hasCurrent) {
-    const auto &program = programCache.outputB.current;
-    if (program.trigger == "Manual") {
-      outputBState = program.enabled;
-      digitalWrite(OUTPUT_B_PIN, outputBState ? HIGH : LOW);
-      cycleStateB = { false, 0, false, program.id, 0 };
-    } else if (program.trigger == "Cycle Timer") {
-      auto [state, nextToggle] = runCycleTimer("B", cycleStateB, cycleConfigB);
-      outputBState = state;
-      digitalWrite(OUTPUT_B_PIN, outputBState ? HIGH : LOW);
-      cycleStateB.activeProgram = program.id;
-      cycleStateB.nextToggle = nextToggle;
-    } else {
-      outputBState = false;
-      digitalWrite(OUTPUT_B_PIN, LOW);
-      cycleStateB = { false, 0, false, -1, 0 };
-    }
-  } else {
-    outputBState = false;
-    digitalWrite(OUTPUT_B_PIN, LOW);
-    cycleStateB = { false, 0, false, -1, 0 };
-  }
-
-  // Update trigger status for web client
-  std::vector<TriggerInfo> triggerInfo;
-  for (const auto &program : programCache.programs) {
-    TriggerInfo info = { program.id, program.output, program.trigger, 0, "", false };
-    if (program.output == "A" && program.id == activeProgramA) {
-      info.state = outputAState;
-      if (program.trigger == "Cycle Timer") info.next_toggle = cycleStateA.nextToggle;
-    } else if (program.output == "B" && program.id == activeProgramB) {
-      info.state = outputBState;
-      if (program.trigger == "Cycle Timer") info.next_toggle = cycleStateB.nextToggle;
-    }
-    triggerInfo.push_back(info);
-  }
-  for (int id : null_program_ids) {
-    //triggerInfo.push_back({ id, "Null", programConfigs[id].trigger, 0, "", false });
-  }
-  if (triggerInfo != last_trigger_info) {
-    sendTriggerStatus(triggerInfo);
-    last_trigger_info = triggerInfo;
-  }
-  if (null_program_ids != last_null_program_ids) {
-    sendOutputStatus(null_program_ids);
-    last_null_program_ids = null_program_ids;
-  }
+  
 }
 
 void updateDebugLevel() {
@@ -1758,6 +1576,7 @@ void setup() {
   server.addHandler(&ws);
   ElegantOTA.begin(&server, OTA_USERNAME, OTA_PASSWORD);
   server.begin();
+  updateProgramCache();
 }
 
 void loop() {
