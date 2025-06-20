@@ -38,3 +38,4 @@ R0.35: CSS changes.
 R0.36: Sensor capability options.
 R0.37: Sensor capabilities get their own keys.
 R0.38: Fix cycle timer capability. 
+R0.39: Program Editor formatting.

@@ -411,19 +411,11 @@ function ProgramEditor({ wsRef, isWsReady, programs, sensors }) {
       setTriggerType(value);
       setTriggerAddress('');
       setTriggerCapability('');
-      if (value !== 'Cycle Timer') {
-        setRunTime({ seconds: '', minutes: '', hours: '' });
-        setStopTime({ seconds: '', minutes: '', hours: '' });
-        setStartHigh(true);
-      }
     } else {
       const [type, address, capability] = value.split('_');
       setTriggerType(type);
       setTriggerAddress(address || '');
       setTriggerCapability(capability || '');
-      setRunTime({ seconds: '', minutes: '', hours: '' });
-      setStopTime({ seconds: '', minutes: '', hours: '' });
-      setStartHigh(true);
     }
   };
 
@@ -752,9 +744,9 @@ function ProgramEditor({ wsRef, isWsReady, programs, sensors }) {
           </div>
         ) : (
           <div className="manual-message">
-            {triggerType === 'Manual' && !isMonitorOnly
-              ? 'Manually powered on'
-              : `Monitoring ${triggerType} ${triggerAddress} ${triggerCapability}`}
+            {triggerType === 'Manual' && (
+              'Manually powered on'
+            )}
           </div>
         )}
       </div>
