@@ -5,3 +5,5 @@
 
 - Developed for Socket Controller
 - https://socketcontroller.com/
+- (firmware is being rebuilt for Arduino IDE and React front end)
+- lagacy code https://github.com/raako71/VersionJ_Mongoose
