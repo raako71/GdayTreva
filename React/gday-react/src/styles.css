@@ -13,7 +13,8 @@
 
 .App {
   padding-top: 40px;
-  color: #009a0a;
+  color: #089f12;
+  stroke: #089f12;
 }
 
 .Title{
@@ -51,12 +52,12 @@
   display: flex;
   align-items: center;
   margin-left: auto;
+  
 }
 
 .hamburger-icon {
   width: 24px;
   height: 24px;
-  stroke: white;
 }
 
 .menu {
@@ -100,21 +101,6 @@
 .Tile-container {
   display: flex;
   justify-content: center;
-}
-
-a:link, a:visited {
-  color: #00ff11;
-  cursor: pointer;
-  text-decoration: none;
-}
-
-a:hover {
-  color: #fff;
-  text-decoration: underline;
-}
-
-a:active {
-  color: blue;
 }
 
 table {
@@ -284,7 +270,6 @@ input:checked + .enabled-slider:before {
 
 .time-display {
   cursor: pointer;
-  color: #00ff11;
 }
 
 .time-display:hover {
@@ -310,10 +295,9 @@ input:checked + .enabled-slider:before {
 
 .overlay {
   background-color: #242424;
-  color: rgba(255, 255, 255, 0.87);
-  border-radius: 4px;
+  border-radius: 10px;
   padding: 16px;
-  width: 300px;
+  width: 400px;
   max-width: 90%;
   box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3);
 }
@@ -325,8 +309,8 @@ input:checked + .enabled-slider:before {
 }
 
 .overlay p {
-  font-size: 14px;
-  margin-bottom: 8px;
+  font-size: 17px;
+  
 }
 
 .overlay-error {
@@ -335,25 +319,40 @@ input:checked + .enabled-slider:before {
   margin-top: 8px;
 }
 
+a:link, a:visited, .save-button, .time-display {
+  color: #00e00f;
+  cursor: pointer;
+  text-decoration: none;
+}
+
+a:hover {
+  color: rgba(255, 255, 255, 0.85);
+  text-decoration: underline;
+}
+
+a:active, .save-button:hover {
+  color: rgba(255, 255, 255, 0.85);
+}
+
 .save-button {
-  background-color: #007bff;
-  color: white;
+  background-color: #00000000;
   padding: 8px 16px;
   border: none;
   border-radius: 4px;
   cursor: pointer;
   margin: 5px;
+  border-style: solid;
 }
 
 .save-button:hover {
-  background-color: #0056b3;
+  box-shadow: 0 0 10px 1px;
 }
 
 .overlay-buttons {
   display: flex;
   justify-content: center;
   gap: 8px;
-  margin-top: 12px;
+  margin: 20px 0 1px 0;
 }
 
 .cancel-button {
@@ -383,4 +382,9 @@ input:checked + .enabled-slider:before {
 
 .basic-div{
   margin: 15px;
+}
+
+.center{
+  width: fit-content;
+  margin: auto;
 }

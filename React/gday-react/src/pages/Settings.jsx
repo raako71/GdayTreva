@@ -77,7 +77,9 @@ function Settings({ requestNetworkInfo, networkInfo, connectionStatus, sensors }
             <div>Loading network info...</div>
           )}
           {!showAdvanced && (<p></p>)}
+          <div className='center'>
           <button
+          className="save-button"
             onClick={() => {
               console.log('Manual refresh - requesting network info');
               requestNetworkInfo();
@@ -85,6 +87,7 @@ function Settings({ requestNetworkInfo, networkInfo, connectionStatus, sensors }
           >
             Refresh Network Info
           </button>
+          </div>
         </div>
         <div className="Tile">
           <h2>Discovered Sensors</h2>
@@ -92,7 +95,7 @@ function Settings({ requestNetworkInfo, networkInfo, connectionStatus, sensors }
             <ul>
               {sensors.map((sensor, index) => (
                 <li key={`${sensor.type}_${sensor.address}_${index}`}>
-                  {sensor.type} {sensor.address} ({sensor.active ? 'Active' : 'Inactive'})
+                  {sensor.type} {sensor.address}
                 </li>
               ))}
             </ul>
