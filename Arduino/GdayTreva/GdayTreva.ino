@@ -111,7 +111,6 @@ int debugLevel = 1;
 
 std::map<AsyncWebSocketClient *, uint32_t> subscriber_epochs;
 uint32_t last_output_epoch = 0;
-std::vector<int> last_null_program_ids;
 
 struct TriggerInfo {
   int id;
@@ -434,8 +433,10 @@ void sendSensorStatus() {
   }
 }
 
-// Sends output status
-void sendOutputStatus(const std::vector<int> &null_program_ids) {
+// Sends output status 
+/* 
+INVALID
+void sendOutputStatus(const std::vector<int> &null_programupdateActiveSensors_ids) {
   if (subscriber_epochs.empty()) return;
 
   uint32_t new_epoch = millis();
@@ -463,7 +464,7 @@ void sendOutputStatus(const std::vector<int> &null_program_ids) {
     }
   }
   last_output_epoch = new_epoch;
-}
+}*/
 
 // Sends trigger status
 void sendTriggerStatus(const std::vector<TriggerInfo> &trigger_info) {
@@ -501,6 +502,65 @@ void sendTriggerStatus(const std::vector<TriggerInfo> &trigger_info) {
       DEBUG_PRINT(1, "Sent trigger_status to client #%u\n", pair.first->id());
     }
   }
+}
+
+std::vector<SensorInfo> activeSensors;
+
+void updateActiveSensors() {
+  activeSensors.clear();
+  
+  // Helper lambda to add sensor to activeSensors if not already present
+  auto addSensorIfUnique = [&](const String& sensorType, uint8_t sensorAddress, const String& capability) {
+    // Check if sensor already exists
+    auto it = std::find_if(activeSensors.begin(), activeSensors.end(),
+        [&](const SensorInfo& s) { return s.type == sensorType && s.address == sensorAddress; });
+    if (it == activeSensors.end()) {
+      // New sensor, create with capability in vector
+      SensorInfo sensor = { sensorType, sensorAddress, 1000, {capability} };
+      activeSensors.push_back(sensor);
+      DEBUG_PRINT(1, "Added active sensor: %s at 0x%02X with capability: %s\n",
+                  sensorType.c_str(), sensorAddress, capability.c_str());
+    } else {
+      // Existing sensor, add capability if not already present
+      if (std::find(it->capabilities.begin(), it->capabilities.end(), capability) == it->capabilities.end()) {
+        it->capabilities.push_back(capability);
+        DEBUG_PRINT(1, "Added capability %s to existing sensor: %s at 0x%02X\n",
+                    capability.c_str(), sensorType.c_str(), sensorAddress);
+      }
+    }
+  };
+
+  // Check null_program_ids for sensors
+  for (const int id : null_program_ids) {
+    for (const auto& prog : ProgramCache) {
+      if (prog.id == id && prog.enabled && !prog.sensorType.isEmpty() &&
+          prog.sensorAddress != 0 && !prog.sensorCapability.isEmpty()) {
+        addSensorIfUnique(prog.sensorType, prog.sensorAddress, prog.sensorCapability);
+      }
+    }
+  }
+
+  // Check activeProgramA for sensor
+  if (activeProgramA != -1) {
+    auto it = std::find_if(ProgramCache.begin(), ProgramCache.end(),
+        [&](const ProgramDetails& p) { return p.id == activeProgramA; });
+    if (it != ProgramCache.end() && it->enabled && !it->sensorType.isEmpty() &&
+        it->sensorAddress != 0 && !it->sensorCapability.isEmpty()) {
+      addSensorIfUnique(it->sensorType, it->sensorAddress, it->sensorCapability);
+    }
+  }
+
+  // Check activeProgramB for sensor
+  if (activeProgramB != -1) {
+    auto it = std::find_if(ProgramCache.begin(), ProgramCache.end(),
+        [&](const ProgramDetails& p) { return p.id == activeProgramB; });
+    if (it != ProgramCache.end() && it->enabled && !it->sensorType.isEmpty() &&
+        it->sensorAddress != 0 && !it->sensorCapability.isEmpty()) {
+      addSensorIfUnique(it->sensorType, it->sensorAddress, it->sensorCapability);
+    }
+  }
+
+  DEBUG_PRINT(1, "Updated activeSensors with %d sensors\n", activeSensors.size());
 }
 
 // Network event handler
@@ -1275,6 +1335,7 @@ void setProgramPriorities(time_t now) {
 
   DEBUG_PRINT(1, "Programs set: activeProgramA=%d, activeProgramB=%d, nextTransA=%ld, nextTransB=%ld\n",
               activeProgramA, activeProgramB, nextTransA, nextTransB);
+  updateActiveSensors();
 }
 
 //update program cache from flash.
