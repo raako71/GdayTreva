@@ -41,3 +41,4 @@
  DEBUG logging ADDED
  working on program cache
  - 0.3: Reformat program cache and program selsection.
+ - 0.3.1: Reform sensor scanning function.

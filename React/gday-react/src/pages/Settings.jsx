@@ -92,7 +92,7 @@ function Settings({ requestNetworkInfo, networkInfo, connectionStatus, sensors }
             <ul>
               {sensors.map((sensor, index) => (
                 <li key={`${sensor.type}_${sensor.address}_${index}`}>
-                  {sensor.type} 0x{sensor.address} ({sensor.active ? 'Active' : 'Inactive'})
+                  {sensor.type} {sensor.address} ({sensor.active ? 'Active' : 'Inactive'})
                 </li>
               ))}
             </ul>

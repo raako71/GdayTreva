@@ -52,34 +52,8 @@ static unsigned long otaProgressMillis = 0;
 Adafruit_BME280 bme280;
 SensirionI2cSht3x sht3x;
 
-// Enhanced Sensor structure
-struct SensorInfo {
-  String type;                         // Sensor type (e.g., "ACS71020", "BME280")
-  uint8_t address;                     // I2C address
-  bool active;                         // Whether sensor is actively polled
-  unsigned long maxPollingInterval;    // Polling interval in ms
-  unsigned long lastPollTime;          // Last poll time in ms
-  String lastValue;                    // JSON string of latest readings
-  bool loggingEnabled;                 // Whether logging is enabled
-  bool (*pollFunction)(SensorInfo &);  // Sensor-specific polling function
-  std::vector<String> capabilities;    // Available measurements (e.g., ["Temperature", "Humidity", "Pressure"])
-  bool operator==(const SensorInfo &other) const {
-    return type == other.type && address == other.address && active == other.active && maxPollingInterval == other.maxPollingInterval && lastPollTime == other.lastPollTime && lastValue == other.lastValue && loggingEnabled == other.loggingEnabled && capabilities == other.capabilities;
-  }
-};
-
-// Sensor polling structure for priority queue
-struct SensorPoll {
-  SensorInfo *sensor;          // Pointer to sensor info
-  unsigned long nextPollTime;  // Next scheduled poll time
-  bool operator<(const SensorPoll &other) const {
-    return nextPollTime > other.nextPollTime;  // Min-heap (earliest first)
-  }
-};
-
 // Global variables
-std::vector<SensorInfo> detectedSensors;
-std::priority_queue<SensorPoll> sensorQueue;
+
 std::vector<String> logBuffer;
 unsigned long lastLogWrite = 0;
 time_t nextTransA, nextTransB;
@@ -176,6 +150,20 @@ struct ProgramDetails {
 
 std::vector<ProgramDetails> ProgramCache;
 
+// Enhanced Sensor structure
+struct SensorInfo {
+  String type;                       // Sensor type (e.g., "ACS71020", "BME280")
+  uint8_t address;                   // I2C address
+  unsigned long maxPollingInterval;  // Polling interval in ms
+  //bool (*pollFunction)(SensorInfo &);  // Sensor-specific polling function
+  std::vector<String> capabilities;  // Available measurements (e.g., ["Temperature", "Humidity", "Pressure"])
+  // Define equality operator
+  bool operator==(const SensorInfo &other) const {
+    return type == other.type && address == other.address && maxPollingInterval == other.maxPollingInterval && capabilities == other.capabilities;
+  }
+};
+
+std::vector<SensorInfo> detectedSensors;
 
 // I2C Scanner function
 void scanI2CSensors() {
@@ -195,7 +183,7 @@ void scanI2CSensors() {
       String sensorType = "Unknown";
       bool isSensor = false;
       unsigned long pollingInterval = 1000;
-      bool (*pollFunc)(SensorInfo &) = pollGeneric;
+      //bool (*pollFunc)(SensorInfo &) = pollGeneric;
       std::vector<String> capabilities;
 
       // Check for sensors in the overlapping address range (0x60 to 0x67)
@@ -211,13 +199,13 @@ void scanI2CSensors() {
               sensorType = "MCP9600";
               isSensor = true;
               pollingInterval = 1000;
-              pollFunc = pollGeneric;
+              //pollFunc = pollGeneric;
               capabilities = { "Temperature" };
             } else if ((deviceId >> 8) == 0x41) {  // MCP9600 Device ID
               sensorType = "MCP9601";
               isSensor = true;
               pollingInterval = 1000;
-              pollFunc = pollGeneric;
+              //pollFunc = pollGeneric;
               capabilities = { "Temperature" };
             }
           }
@@ -229,7 +217,7 @@ void scanI2CSensors() {
               sensorType = "ACS71020";
               isSensor = true;
               pollingInterval = 100;
-              pollFunc = pollACS71020;
+              //pollFunc = pollACS71020;
               capabilities = { "Current", "Voltage", "Power" };
               break;
             }
@@ -244,7 +232,7 @@ void scanI2CSensors() {
             sensorType = "BME280";
             isSensor = true;
             pollingInterval = 1000;
-            pollFunc = pollBME280;
+            //pollFunc = pollBME280;
             capabilities = { "Temperature", "Humidity", "Pressure" };
             break;
           }
@@ -258,7 +246,7 @@ void scanI2CSensors() {
             sensorType = "VEML6030";
             isSensor = true;
             pollingInterval = 500;
-            pollFunc = pollVEML6030;
+            //pollFunc = pollVEML6030;
             capabilities = { "Lux" };
             break;
           }
@@ -272,7 +260,7 @@ void scanI2CSensors() {
             sensorType = "SHT3x-DIS";
             isSensor = true;
             pollingInterval = 1000;
-            pollFunc = pollSHT3x;
+            //pollFunc = pollSHT3x;
             capabilities = { "Temperature", "Humidity" };
             break;
           }
@@ -286,7 +274,7 @@ void scanI2CSensors() {
             sensorType = "HDC2080";
             isSensor = true;
             pollingInterval = 1000;
-            pollFunc = pollGeneric;
+            //pollFunc = pollGeneric;
             capabilities = { "Temperature", "Humidity" };
             break;
           }
@@ -297,12 +285,7 @@ void scanI2CSensors() {
         SensorInfo sensor = {
           sensorType,
           address,
-          false,
           pollingInterval,
-          0,
-          "{}",
-          false,
-          pollFunc,
           capabilities
         };
         newSensors.push_back(sensor);
@@ -323,7 +306,7 @@ void scanI2CSensors() {
 
   DEBUG_PRINT(1, "I2C scan complete. Found %d sensors.\n", detectedSensors.size());
 }
-
+/*
 bool pollACS71020(SensorInfo &sensor) {
   const int maxRetries = 3;
   for (int attempt = 1; attempt <= maxRetries; attempt++) {
@@ -336,8 +319,8 @@ bool pollACS71020(SensorInfo &sensor) {
         float current = raw * 0.1;  // Simplified conversion
         StaticJsonDocument<128> doc;
         doc["current"] = current;
-        serializeJson(doc, sensor.lastValue);
-        sensor.lastPollTime = millis();
+        //serializeJson(doc, sensor.lastValue);
+        //sensor.lastPollTime = millis();
         return true;
       }
     }
@@ -345,7 +328,8 @@ bool pollACS71020(SensorInfo &sensor) {
   }
   return false;
 }
-
+*/
+/*
 bool pollBME280(SensorInfo &sensor) {
   static bool initialized = false;
   if (!initialized) {
@@ -369,11 +353,12 @@ bool pollBME280(SensorInfo &sensor) {
   doc["temperature"] = temp;
   doc["humidity"] = hum;
   doc["pressure"] = pres;
-  serializeJson(doc, sensor.lastValue);
-  sensor.lastPollTime = millis();
+  //serializeJson(doc, sensor.lastValue);
+  //sensor.lastPollTime = millis();
   return true;
 }
-
+*/
+/*
 bool pollSHT3x(SensorInfo &sensor) {
   // Initialize SHT3x if not already done
   static bool initialized = false;
@@ -397,95 +382,11 @@ bool pollSHT3x(SensorInfo &sensor) {
   StaticJsonDocument<128> doc;
   doc["temperature"] = temp;
   doc["humidity"] = hum;
-  serializeJson(doc, sensor.lastValue);
-  sensor.lastPollTime = millis();
+  //serializeJson(doc, sensor.lastValue);
+  //sensor.lastPollTime = millis();
   return true;
 }
-
-bool pollVEML6030(SensorInfo &sensor) {
-  const int maxRetries = 3;
-  for (int attempt = 1; attempt <= maxRetries; attempt++) {
-    Wire.beginTransmission(sensor.address);
-    Wire.write(0x00);  // ALS data register
-    if (Wire.endTransmission() == 0) {
-      Wire.requestFrom(sensor.address, (uint8_t)2);
-      if (Wire.available() == 2) {
-        uint16_t lux = Wire.read() | (Wire.read() << 8);
-        StaticJsonDocument<128> doc;
-        doc["lux"] = lux;
-        serializeJson(doc, sensor.lastValue);
-        sensor.lastPollTime = millis();
-        return true;
-      }
-    }
-    delay(10);
-  }
-  return false;
-}
-
-// Generic fallback for unknown sensors
-bool pollGeneric(SensorInfo &sensor) {
-  const int maxRetries = 3;
-  for (int attempt = 1; attempt <= maxRetries; attempt++) {
-    Wire.beginTransmission(sensor.address);
-    if (Wire.endTransmission() == 0) {
-      Wire.requestFrom(sensor.address, (uint8_t)2);
-      if (Wire.available() == 2) {
-        uint16_t value = Wire.read() | (Wire.read() << 8);
-        StaticJsonDocument<128> doc;
-        doc["value"] = value;
-        serializeJson(doc, sensor.lastValue);
-        sensor.lastPollTime = millis();
-        return true;
-      }
-    }
-    delay(10);
-  }
-  return false;
-}
-
-// Updated pollSensor dispatcher
-bool pollSensor(SensorInfo &sensor) {
-  if (sensor.pollFunction) {
-    bool success = sensor.pollFunction(sensor);
-    if (!success) {
-      DEBUG_PRINT(1, "Failed to poll %s at 0x%02X\n", sensor.type.c_str(), sensor.address);
-    }
-    return success;
-  }
-  return pollGeneric(sensor);
-}
-
-// Logs sensor data to buffer
-void logSensorData(const SensorInfo &sensor) {
-}
-// Polls active sensors
-void pollActiveSensors() {
-  bool sensorDataChanged = false;
-  unsigned long currentTime = millis();
-  while (!sensorQueue.empty() && sensorQueue.top().nextPollTime <= currentTime) {
-    SensorPoll poll = sensorQueue.top();
-    sensorQueue.pop();
-    if (poll.sensor->active) {
-      String prevValue = poll.sensor->lastValue;
-      if (pollSensor(*poll.sensor)) {
-        if (poll.sensor->loggingEnabled) {
-          logSensorData(*poll.sensor);
-        }
-        if (poll.sensor->lastValue != prevValue) {
-          sensorDataChanged = true;
-        }
-      }
-      SensorPoll nextPoll = { poll.sensor, currentTime + poll.sensor->maxPollingInterval };
-      sensorQueue.push(nextPoll);
-    }
-  }
-  if (sensorDataChanged) {
-    DEBUG_PRINT(1, "\nNew Sensor Data.\n");
-    //sendSensorStatus();
-  }
-}
-
+*/
 // FreeRTOS task for periodic I2C scanningsendSensorStatus
 void i2cScanTask(void *parameter) {
   while (true) {
@@ -510,22 +411,9 @@ void sendSensorStatus() {
       char addrStr[5];
       snprintf(addrStr, sizeof(addrStr), "0x%02X", sensor.address);
       sensorObj["address"] = addrStr;
-      sensorObj["active"] = sensor.active;
       JsonArray caps = sensorObj.createNestedArray("capabilities");
       for (const auto &cap : sensor.capabilities) {
         caps.add(cap);
-      }
-      if (sensor.active && !sensor.lastValue.isEmpty()) {
-        // Create a temporary JsonDocument to parse lastValue
-        StaticJsonDocument<256> tempDoc;
-        DeserializationError error = deserializeJson(tempDoc, sensor.lastValue);
-        if (!error) {
-          sensorObj["value"] = tempDoc.as<JsonObject>();
-        } else {
-          sensorObj["value"] = nullptr;
-          DEBUG_PRINT(1, "Failed to parse sensor.lastValue for %s at 0x%02X: %s\n",
-                      sensor.type.c_str(), sensor.address, error.c_str());
-        }
       }
     }
     char buffer[1024];
@@ -1468,7 +1356,6 @@ void updateProgramCache() {
 }
 
 void updateOutputs() {
-  
 }
 
 void updateDebugLevel() {
