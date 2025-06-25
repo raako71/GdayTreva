@@ -7,9 +7,11 @@ function TimeBar({ message, wsRef }) {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [isOverlayOpen, setIsOverlayOpen] = useState(false);
   const [offsetError, setOffsetError] = useState(null);
+  const [isMemoryTooltipOpen, setIsMemoryTooltipOpen] = useState(false);
   const timeoutRef = useRef(null);
   const menuRef = useRef(null);
   const buttonRef = useRef(null);
+  const memoryRef = useRef(null);
 
   // Format time with ESP32's offset
   const formatTime = (epoch, offsetMinutes) => {
@@ -54,7 +56,7 @@ function TimeBar({ message, wsRef }) {
     if (days > 0) parts.push(`${days}d`);
     if (hours > 0 || parts.length > 0) parts.push(`${hours}h`);
     if (minutes > 0 || parts.length > 0) parts.push(`${minutes}m`);
-    parts.push(`${seconds}s`); // Always include seconds, even if 0
+    parts.push(`${seconds}s`);
 
     return parts.join(' ');
   };
@@ -66,6 +68,12 @@ function TimeBar({ message, wsRef }) {
     const mins = Math.abs(minutes) % 60;
     const sign = minutes >= 0 ? '+' : '-';
     return `${sign}${String(hours).padStart(2, '0')}:${String(mins).padStart(2, '0')}`;
+  };
+
+  // Format memory in KB
+  const formatMemory = (bytes) => {
+    if (bytes == null || isNaN(bytes)) return 'N/A';
+    return `${Math.round(bytes / 1024)} KB`;
   };
 
   const toggleMenu = () => {
@@ -135,26 +143,39 @@ function TimeBar({ message, wsRef }) {
     ? Math.round(((message.mem_total - message.mem_used) / message.mem_total) * 100)
     : 0;
 
+  const memFree = message?.mem_total && message?.mem_used
+    ? message.mem_total - message.mem_used
+    : null;
+
   const browserOffset = -new Date().getTimezoneOffset();
   const isOffsetMismatch = message?.offset_minutes != null && message.offset_minutes !== browserOffset;
 
   return (
     <div className="time-bar">
-      <Link to="/">
-        Home
-      </Link>
-       - 
-      <a className="time-display"
-        onClick={toggleOverlay}
-        aria-label="Adjust time offset"
-      >
+      <Link to="/">Home</Link> - 
+      <a className="time-display" onClick={toggleOverlay} aria-label="Adjust time offset">
         Device time:{' '}
         <span className={isOffsetMismatch ? 'offset-mismatch' : ''}>
           {formatTime(message?.epoch, message?.offset_minutes)}
         </span>
       </a>
       <div>-</div>
-      <div>Memory Free: {memPercent}%</div>
+      <div
+        ref={memoryRef}
+        className="memory-display"
+        onMouseEnter={() => setIsMemoryTooltipOpen(true)}
+        onMouseLeave={() => setIsMemoryTooltipOpen(false)}
+        aria-label="Memory usage details"
+      >
+        Memory Free: {memPercent}%
+        {isMemoryTooltipOpen && (
+          <div className="memory-tooltip">
+            <p>Free: {formatMemory(memFree)}</p>
+            <p>Used: {formatMemory(message?.mem_used)}</p>
+            <p>Total: {formatMemory(message?.mem_total)}</p>
+          </div>
+        )}
+      </div>
       <div>-</div>
       <div>Uptime: {formatUptime(message?.millis)}</div>
       <button

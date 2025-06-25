@@ -355,20 +355,6 @@ a:active, .save-button:hover {
   margin: 20px 0 1px 0;
 }
 
-.cancel-button {
-  background-color: #3a3a3a;
-  color: white;
-  padding: 8px 16px;
-  border: none;
-  border-radius: 4px;
-  cursor: pointer;
-  margin: 5px;
-}
-
-.cancel-button:hover {
-  background-color: #4a4a4a;
-}
-
 .form-text {
   font-size: 0.8em;
   color: #808080;
@@ -387,4 +373,38 @@ a:active, .save-button:hover {
 .center{
   width: fit-content;
   margin: auto;
+}
+
+.memory-display {
+  position: relative;
+  cursor: pointer;
+}
+
+.memory-tooltip {
+  position: absolute;
+  top: 130%;
+  left: 50%;
+  transform: translateX(-50%);
+  background-color: #333;
+  padding: 8px 12px;
+  border-radius: 4px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+  z-index: 10;
+  white-space: nowrap;
+  font-size: 0.9em;
+}
+
+.memory-tooltip p {
+  margin: 4px 0;
+}
+
+.memory-tooltip::before {
+  content: '';
+  position: absolute;
+  top: -6px;
+  left: 50%;
+  transform: translateX(-50%);
+  border-left: 6px solid transparent;
+  border-right: 6px solid transparent;
+  border-bottom: 6px solid #333;
 }

@@ -746,7 +746,7 @@ function ProgramEditor({ wsRef, isWsReady, programs, sensors }) {
         <button className="save-button" onClick={saveProgram}>
           Save Program
         </button>
-        <button className="cancel-button" onClick={cancelEdit}>
+        <button className="save-button" onClick={cancelEdit}>
           Cancel
         </button>
       </div>
