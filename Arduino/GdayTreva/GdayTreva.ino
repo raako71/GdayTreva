@@ -216,7 +216,6 @@ void scanI2CSensors() {
               sensorType = "ACS71020";
               isSensor = true;
               pollingInterval = 100;
-              //pollFunc = pollACS71020;
               capabilities = { "Current", "Voltage", "Power" };
               break;
             }
@@ -350,39 +349,6 @@ void sendSensorStatus() {
   }
 }
 
-// Sends output status 
-/* 
-INVALID
-void sendOutputStatus(const std::vector<int> &null_programupdateActiveSensors_ids) {
-  if (subscriber_epochs.empty()) return;
-
-  uint32_t new_epoch = millis();
-  StaticJsonDocument<512> doc;
-  doc["type"] = "output_status";
-  doc["epoch"] = new_epoch;
-  doc["prog_a"] = cycleStateA.activeProgram;
-  doc["prog_b"] = cycleStateB.activeProgram;
-  doc["out_a"] = outputAState;
-  doc["out_b"] = outputBState;
-
-  JsonArray null_ids = doc.createNestedArray("null_progs");
-  for (int id : null_program_ids) {
-    null_ids.add(id);
-  }
-
-  String json;
-  serializeJson(doc, json);
-
-  for (auto &pair : subscriber_epochs) {
-    if (new_epoch > pair.second) {
-      pair.first->text(json);
-      pair.second = new_epoch;
-      DEBUG_PRINT(1, "Sent output_status to client #%u\n", pair.first->id());
-    }
-  }
-  last_output_epoch = new_epoch;
-}*/
-
 // Sends trigger status
 void sendTriggerStatus(const std::vector<TriggerInfo> &trigger_info) {
   Serial.println("Sending Trigger status.");
@@ -424,16 +390,19 @@ void sendTriggerStatus(const std::vector<TriggerInfo> &trigger_info) {
 std::vector<SensorInfo> activeSensors;
 
 void updateActiveSensors() {
+  DEBUG_PRINT(1, "updateActiveSensors\n",
   activeSensors.clear();
-  
+
   // Helper lambda to add sensor to activeSensors if not already present
-  auto addSensorIfUnique = [&](const String& sensorType, uint8_t sensorAddress, const String& capability) {
+  auto addSensorIfUnique = [&](const String &sensorType, uint8_t sensorAddress, const String &capability) {
     // Check if sensor already exists
     auto it = std::find_if(activeSensors.begin(), activeSensors.end(),
-        [&](const SensorInfo& s) { return s.type == sensorType && s.address == sensorAddress; });
+                           [&](const SensorInfo &s) {
+                             return s.type == sensorType && s.address == sensorAddress;
+                           });
     if (it == activeSensors.end()) {
       // New sensor, create with capability in vector
-      SensorInfo sensor = { sensorType, sensorAddress, 1000, {capability} };
+      SensorInfo sensor = { sensorType, sensorAddress, 1000, { capability } };
       activeSensors.push_back(sensor);
       DEBUG_PRINT(1, "Added active sensor: %s at 0x%02X with capability: %s\n",
                   sensorType.c_str(), sensorAddress, capability.c_str());
@@ -449,9 +418,8 @@ void updateActiveSensors() {
 
   // Check null_program_ids for sensors
   for (const int id : null_program_ids) {
-    for (const auto& prog : ProgramCache) {
-      if (prog.id == id && prog.enabled && !prog.sensorType.isEmpty() &&
-          prog.sensorAddress != 0 && !prog.sensorCapability.isEmpty()) {
+    for (const auto &prog : ProgramCache) {
+      if (prog.id == id && prog.enabled && !prog.sensorType.isEmpty() && prog.sensorAddress != 0 && !prog.sensorCapability.isEmpty()) {
         addSensorIfUnique(prog.sensorType, prog.sensorAddress, prog.sensorCapability);
       }
     }
@@ -460,9 +428,10 @@ void updateActiveSensors() {
   // Check activeProgramA for sensor
   if (activeProgramA != -1) {
     auto it = std::find_if(ProgramCache.begin(), ProgramCache.end(),
-        [&](const ProgramDetails& p) { return p.id == activeProgramA; });
-    if (it != ProgramCache.end() && it->enabled && !it->sensorType.isEmpty() &&
-        it->sensorAddress != 0 && !it->sensorCapability.isEmpty()) {
+                           [&](const ProgramDetails &p) {
+                             return p.id == activeProgramA;
+                           });
+    if (it != ProgramCache.end() && it->enabled && !it->sensorType.isEmpty() && it->sensorAddress != 0 && !it->sensorCapability.isEmpty()) {
       addSensorIfUnique(it->sensorType, it->sensorAddress, it->sensorCapability);
     }
   }
@@ -470,9 +439,10 @@ void updateActiveSensors() {
   // Check activeProgramB for sensor
   if (activeProgramB != -1) {
     auto it = std::find_if(ProgramCache.begin(), ProgramCache.end(),
-        [&](const ProgramDetails& p) { return p.id == activeProgramB; });
-    if (it != ProgramCache.end() && it->enabled && !it->sensorType.isEmpty() &&
-        it->sensorAddress != 0 && !it->sensorCapability.isEmpty()) {
+                           [&](const ProgramDetails &p) {
+                             return p.id == activeProgramB;
+                           });
+    if (it != ProgramCache.end() && it->enabled && !it->sensorType.isEmpty() && it->sensorAddress != 0 && !it->sensorCapability.isEmpty()) {
       addSensorIfUnique(it->sensorType, it->sensorAddress, it->sensorCapability);
     }
   }
@@ -480,48 +450,71 @@ void updateActiveSensors() {
   DEBUG_PRINT(1, "Updated activeSensors with %d sensors\n", activeSensors.size());
 }
 
-// Polling function for VEML6030
-std::map<String, String> pollVEML6030(SensorInfo& sensor) {
-  std::map<String, String> readings;
+struct ACSReading {
+  float current;  // Amperes, 2 decimal places
+  int voltage;    // Volts, integer
+  int power;      // Watts, integer
+};
 
-  // Initialize readings to -1
-  for (const auto& cap : sensor.capabilities) {
+// Global variables
+std::map<String, String> sensorReadingsCache;
+std::map<String, String> prevCache;
+unsigned long cacheUpdated = 0;
+std::vector<ACSReading> acsReadingsBuffer;
+bool acsValid = true;
+unsigned long lastACSPoll = 0;
+const unsigned long cacheUpdateInterval = 1000;
+const unsigned long acsPollInterval = 100;
+
+// Polling function for VEML6030
+std::map<String, String> pollVEML6030(SensorInfo &sensor) {
+  std::map<String, String> readings;
+  for (const auto &cap : sensor.capabilities) {
     readings[cap] = "-1";
   }
-
-  // Validate sensor type
   if (sensor.type != "VEML6030") {
     DEBUG_PRINT(1, "Invalid sensor type for VEML6030: %s\n", sensor.type.c_str());
     return readings;
   }
-
-  // Initialize sensor
-  static bool initialized = false;
-  static SparkFun_Ambient_Light veml6030(sensor.address); // Correct class name and address
-  if (!initialized) {
-    if (!veml6030.begin()) { // Returns true on success
+  static std::map<uint8_t, SparkFun_Ambient_Light> veml6030Sensors;
+  static std::map<uint8_t, bool> initialized;
+  if (!initialized[sensor.address]) {
+    // Insert sensor object with explicit constructor
+    auto result = veml6030Sensors.emplace(sensor.address, SparkFun_Ambient_Light(sensor.address));
+    if (!result.second) {
+      // Key already exists, update the value
+      result.first->second = SparkFun_Ambient_Light(sensor.address);
+    }
+    // Access sensor via iterator to avoid operator[]
+    auto sensor_it = veml6030Sensors.find(sensor.address);
+    if (sensor_it == veml6030Sensors.end()) {
+      DEBUG_PRINT(1, "VEML6030 not found at 0x%02X after insertion\n", sensor.address);
+      return readings;
+    }
+    if (!sensor_it->second.begin()) {
       DEBUG_PRINT(1, "VEML6030 initialization failed at 0x%02X\n", sensor.address);
       return readings;
-    } else {
-      DEBUG_PRINT(1, "VEML6030 initialized at 0x%02X\n", sensor.address);
-      veml6030.setGain(0.125); // Use float value as per example
-      veml6030.setIntegTime(100); // Use integer value as per example
     }
-    initialized = true;
+    DEBUG_PRINT(1, "VEML6030 initialized at 0x%02X\n", sensor.address);
+    sensor_it->second.setGain(0.125);
+    sensor_it->second.setIntegTime(100);
+    initialized[sensor.address] = true;
   }
-
-  // Read measurements
-  long lux = veml6030.readLight(); // Returns lux as long
+  // Access sensor via find to avoid operator[]
+  auto sensor_it = veml6030Sensors.find(sensor.address);
+  if (sensor_it == veml6030Sensors.end()) {
+    DEBUG_PRINT(1, "VEML6030 not found at 0x%02X\n", sensor.address);
+    return readings;
+  }
+  long lux = sensor_it->second.readLight();
   if (lux < 0) {
     DEBUG_PRINT(1, "VEML6030 read failed at 0x%02X\n", sensor.address);
     return readings;
   }
-
-  // Format readings
-  char value[16];
-  for (const auto& cap : sensor.capabilities) {
+  char value[32];
+  for (const auto &cap : sensor.capabilities) {
     if (cap == "Lux") {
-      snprintf(value, sizeof(value), "%ld", lux); // Integer
+      snprintf(value, sizeof(value), "%ld", lux);
       readings[cap] = value;
     }
   }
@@ -529,47 +522,55 @@ std::map<String, String> pollVEML6030(SensorInfo& sensor) {
 }
 
 // Polling function for HDC2080
-std::map<String, String> pollHDC2080(SensorInfo& sensor) {
+std::map<String, String> pollHDC2080(SensorInfo &sensor) {
   std::map<String, String> readings;
-
-  // Initialize readings to -1
-  for (const auto& cap : sensor.capabilities) {
+  for (const auto &cap : sensor.capabilities) {
     readings[cap] = "-1";
   }
-
-  // Validate sensor type
   if (sensor.type != "HDC2080") {
     DEBUG_PRINT(1, "Invalid sensor type for HDC2080: %s\n", sensor.type.c_str());
     return readings;
   }
-
-  // Initialize sensor
-  static bool initialized = false;
-  static HDC2080 hdc2080(sensor.address);
-  if (!initialized) {
-    hdc2080.begin(); // No return value check
-    hdc2080.setMeasurementMode(TEMP_AND_HUMID); // Enable both
-    hdc2080.setRate(ONE_HZ); // 1Hz sampling
+  static std::map<uint8_t, HDC2080> hdc2080Sensors;
+  static std::map<uint8_t, bool> initialized;
+  if (!initialized[sensor.address]) {
+    // Insert sensor object with explicit constructor
+    auto result = hdc2080Sensors.emplace(sensor.address, HDC2080(sensor.address));
+    if (!result.second) {
+      // Key already exists, update the value
+      result.first->second = HDC2080(sensor.address);
+    }
+    // Access sensor via iterator to avoid operator[]
+    auto sensor_it = hdc2080Sensors.find(sensor.address);
+    if (sensor_it == hdc2080Sensors.end()) {
+      DEBUG_PRINT(1, "HDC2080 not found at 0x%02X after insertion\n", sensor.address);
+      return readings;
+    }
+    sensor_it->second.begin();  // No return value check
+    sensor_it->second.setMeasurementMode(TEMP_AND_HUMID);
+    sensor_it->second.setRate(ONE_HZ);
     DEBUG_PRINT(1, "HDC2080 initialized at 0x%02X\n", sensor.address);
-    initialized = true;
+    initialized[sensor.address] = true;
   }
-
-  // Read measurements
-  float temp = hdc2080.readTemp();
-  float hum = hdc2080.readHumidity();
+  // Access sensor via find to avoid operator[]
+  auto sensor_it = hdc2080Sensors.find(sensor.address);
+  if (sensor_it == hdc2080Sensors.end()) {
+    DEBUG_PRINT(1, "HDC2080 not found at 0x%02X\n", sensor.address);
+    return readings;
+  }
+  float temp = sensor_it->second.readTemp();
+  float hum = sensor_it->second.readHumidity();
   if (isnan(temp) || isnan(hum)) {
     DEBUG_PRINT(1, "HDC2080 read failed at 0x%02X\n", sensor.address);
     return readings;
   }
-
-  // Format readings
-  char value[16];
-  for (const auto& cap : sensor.capabilities) {
+  char value[32];
+  for (const auto &cap : sensor.capabilities) {
     if (cap == "Temperature") {
-      snprintf(value, sizeof(value), "%.1f", temp); // 1 decimal place
+      snprintf(value, sizeof(value), "%.1f", temp);
       readings[cap] = value;
     } else if (cap == "Humidity") {
-      snprintf(value, sizeof(value), "%.1f", hum); // 1 decimal place
+      snprintf(value, sizeof(value), "%.1f", hum);
       readings[cap] = value;
     }
   }
@@ -577,46 +578,37 @@ std::map<String, String> pollHDC2080(SensorInfo& sensor) {
 }
 
 // Polling function for MCP9600
-std::map<String, String> pollMCP9600(SensorInfo& sensor) {
+std::map<String, String> pollMCP9600(SensorInfo &sensor) {
   std::map<String, String> readings;
-
-  // Initialize readings to -1
-  for (const auto& cap : sensor.capabilities) {
+  for (const auto &cap : sensor.capabilities) {
     readings[cap] = "-1";
   }
-
-  // Validate sensor type
   if (sensor.type != "MCP9600") {
     DEBUG_PRINT(1, "Invalid sensor type for MCP9600: %s\n", sensor.type.c_str());
     return readings;
   }
-
-  // Initialize sensor
-  static bool initialized = false;
-  static MCP9600 mcp9600(sensor.address); // Initialize with I2C address
-  if (!initialized) {
-    if (mcp9600.init(THER_TYPE_K) != NO_ERROR) { // Use THER_TYPE_K
+  static std::map<uint8_t, MCP9600> mcp9600Sensors;
+  static std::map<uint8_t, bool> initialized;
+  if (!initialized[sensor.address]) {
+    mcp9600Sensors.emplace(std::piecewise_construct,
+                           std::forward_as_tuple(sensor.address),
+                           std::forward_as_tuple(sensor.address));
+    if (mcp9600Sensors[sensor.address].init(THER_TYPE_K) != NO_ERROR) {
       DEBUG_PRINT(1, "MCP9600 initialization failed at 0x%02X\n", sensor.address);
       return readings;
-    } else {
-      DEBUG_PRINT(1, "MCP9600 initialized at 0x%02X\n", sensor.address);
-      mcp9600.set_therm_type(THER_TYPE_K); // Set K-type
     }
-    initialized = true;
+    DEBUG_PRINT(1, "MCP9600 initialized at 0x%02X\n", sensor.address);
+    initialized[sensor.address] = true;
   }
-
-  // Read measurements
   float temp;
-  if (mcp9600.read_hot_junc(&temp) != NO_ERROR) { // Use read_hot_junc()
+  if (mcp9600Sensors[sensor.address].read_hot_junc(&temp) != NO_ERROR) {
     DEBUG_PRINT(1, "MCP9600 read failed at 0x%02X\n", sensor.address);
     return readings;
   }
-
-  // Format readings
-  char value[16];
-  for (const auto& cap : sensor.capabilities) {
+  char value[32];
+  for (const auto &cap : sensor.capabilities) {
     if (cap == "Temperature") {
-      snprintf(value, sizeof(value), "%.1f", temp); // 1 decimal place
+      snprintf(value, sizeof(value), "%.1f", temp);
       readings[cap] = value;
     }
   }
@@ -624,11 +616,11 @@ std::map<String, String> pollMCP9600(SensorInfo& sensor) {
 }
 
 // Polling function for SHT3x
-std::map<String, String> pollSHT3x(SensorInfo& sensor) {
+std::map<String, String> pollSHT3x(SensorInfo &sensor) {
   std::map<String, String> readings;
 
   // Initialize readings to -1
-  for (const auto& cap : sensor.capabilities) {
+  for (const auto &cap : sensor.capabilities) {
     readings[cap] = "-1";
   }
 
@@ -643,7 +635,7 @@ std::map<String, String> pollSHT3x(SensorInfo& sensor) {
   static std::map<uint8_t, bool> initialized;
   if (!initialized[sensor.address]) {
     sht3xSensors[sensor.address].begin(Wire, sensor.address);
-    if (sht3xSensors[sensor.address].softReset() != NO_ERROR) { // Use NO_ERROR
+    if (sht3xSensors[sensor.address].softReset() != NO_ERROR) {  // Use NO_ERROR
       DEBUG_PRINT(1, "SHT3x initialization failed at 0x%02X\n", sensor.address);
       return readings;
     } else {
@@ -662,12 +654,12 @@ std::map<String, String> pollSHT3x(SensorInfo& sensor) {
 
   // Format readings
   char value[16];
-  for (const auto& cap : sensor.capabilities) {
+  for (const auto &cap : sensor.capabilities) {
     if (cap == "Temperature") {
-      snprintf(value, sizeof(value), "%.1f", temp); // 1 decimal place
+      snprintf(value, sizeof(value), "%.1f", temp);  // 1 decimal place
       readings[cap] = value;
     } else if (cap == "Humidity") {
-      snprintf(value, sizeof(value), "%.1f", hum); // 1 decimal place
+      snprintf(value, sizeof(value), "%.1f", hum);  // 1 decimal place
       readings[cap] = value;
     }
   }
@@ -675,11 +667,11 @@ std::map<String, String> pollSHT3x(SensorInfo& sensor) {
 }
 
 // Polling function for BME280
-std::map<String, String> pollBME280(SensorInfo& sensor) {
+std::map<String, String> pollBME280(SensorInfo &sensor) {
   std::map<String, String> readings;
 
   // Initialize readings to -1
-  for (const auto& cap : sensor.capabilities) {
+  for (const auto &cap : sensor.capabilities) {
     readings[cap] = "-1";
   }
 
@@ -714,59 +706,58 @@ std::map<String, String> pollBME280(SensorInfo& sensor) {
 
   // Format readings
   char value[16];
-  for (const auto& cap : sensor.capabilities) {
+  for (const auto &cap : sensor.capabilities) {
     if (cap == "Temperature") {
-      snprintf(value, sizeof(value), "%.1f", temp); // 1 decimal place
+      snprintf(value, sizeof(value), "%.1f", temp);  // 1 decimal place
       readings[cap] = value;
     } else if (cap == "Humidity") {
-      snprintf(value, sizeof(value), "%.1f", hum); // 1 decimal place
+      snprintf(value, sizeof(value), "%.1f", hum);  // 1 decimal place
       readings[cap] = value;
     } else if (cap == "Pressure") {
-      snprintf(value, sizeof(value), "%.1f", pres); // 1 decimal place
+      snprintf(value, sizeof(value), "%.1f", pres);  // 1 decimal place
       readings[cap] = value;
     }
   }
   return readings;
 }
 
-// Polling function for ACS71020
-std::map<String, String> pollACS71020(SensorInfo& sensor) {
-  std::map<String, String> readings;
+// Placeholder for voltage reading (implement as needed)
+int readVoltage(uint8_t address) {
+  // TODO: Implement actual voltage reading for ACS71020
+  return 230;  // Temporary placeholder
+}
 
-  // Initialize readings to -1
-  for (const auto& cap : sensor.capabilities) {
+// Updated pollACS71020 for String consistency
+std::map<String, String> pollACS71020(SensorInfo &sensor) {
+  std::map<String, String> readings;
+  for (const auto &cap : sensor.capabilities) {
     readings[cap] = "-1";
   }
-
-  // Validate sensor type
   if (sensor.type != "ACS71020") {
     DEBUG_PRINT(1, "Invalid sensor type for ACS71020: %s\n", sensor.type.c_str());
     return readings;
   }
-
-  // Read measurements
   const int maxRetries = 3;
   for (int attempt = 1; attempt <= maxRetries; attempt++) {
     Wire.beginTransmission(sensor.address);
-    Wire.write(0x20); // Current register
+    Wire.write(0x20);
     if (Wire.endTransmission() == 0) {
       Wire.requestFrom(sensor.address, (uint8_t)2);
       if (Wire.available() == 2) {
         uint16_t raw = (Wire.read() << 8) | Wire.read();
-        float current = raw * 0.1; // Simplified conversion
-        int voltage = 230; // Placeholder
+        float current = raw * 0.1f;
+        int voltage = readVoltage(sensor.address);  // Fixed placeholder
         int power = static_cast<int>(current * voltage);
-
-        char value[16];
-        for (const auto& cap : sensor.capabilities) {
+        char value[32];
+        for (const auto &cap : sensor.capabilities) {
           if (cap == "Current") {
-            snprintf(value, sizeof(value), "%.2f", current); // 2 decimal places
+            snprintf(value, sizeof(value), "%.2f", round(current * 100.0f) / 100.0f);
             readings[cap] = value;
           } else if (cap == "Voltage") {
-            snprintf(value, sizeof(value), "%d", voltage); // Integer
+            snprintf(value, sizeof(value), "%d", voltage);
             readings[cap] = value;
           } else if (cap == "Power") {
-            snprintf(value, sizeof(value), "%d", power); // Integer
+            snprintf(value, sizeof(value), "%d", power);
             readings[cap] = value;
           }
         }
@@ -779,96 +770,86 @@ std::map<String, String> pollACS71020(SensorInfo& sensor) {
   return readings;
 }
 
-// Global cache for sensor readings
-std::map<String, String> sensorReadingsCache;
-std::map<String, String> prevCache;
-
-// Cache update timestamp
-unsigned long cacheUpdated = 0;
-
-// ACS71020 buffer and validation
-std::map<uint8_t, std::vector<std::map<String, float>>> acsReadingsBuffer;
-std::map<uint8_t, bool> acsValid;
-
-// Last poll times
-unsigned long lastACSPoll = 0;
-const unsigned long cacheUpdateInterval = 1000; // 1Hz (1 second)
-const unsigned long acsPollInterval = 100; // 10Hz (100ms)
-
 // Main polling function
 void pollSensors() {
   // Poll ACS71020 at 10Hz
-  if (millis() - lastACSPoll >= acsPollInterval) {
-    for (auto& sensor : activeSensors) {
-      if (sensor.type == "ACS71020" && acsValid[sensor.address]) {
-        // Poll sensor
+  if (acsValid && millis() - lastACSPoll >= acsPollInterval) {
+    for (auto &sensor : activeSensors) {
+      if (sensor.type == "ACS71020") {
         auto readings = pollACS71020(sensor);
-        // Update cache for valid readings
-        if (acsValid[sensor.address]) {
-          for (const auto& cap : sensor.capabilities) {
-            char key[64];
-            snprintf(key, sizeof(key), "%s:0x%02X:%s", sensor.type.c_str(), sensor.address, cap.c_str());
-            sensorReadingsCache[key] = readings[cap];
-          }
-        } else {
-          DEBUG_PRINT(1, "ACS71020 poll failed at 0x%02X\n", sensor.address);
+        ACSReading reading;
+        reading.current = readings.at("Current") == "-1" ? -1.0f : atof(readings.at("Current").c_str());
+        reading.voltage = readings.at("Voltage") == "-1" ? -1 : atoi(readings.at("Voltage").c_str());
+        reading.power = readings.at("Power") == "-1" ? -1 : atoi(readings.at("Power").c_str());
+        bool validReadings = (reading.current >= 0 && reading.voltage >= 0 && reading.power >= 0);
+        if (!validReadings) {
+          acsValid = false;
         }
+        if (acsValid) {
+          acsReadingsBuffer.push_back(reading);
+        }
+        lastACSPoll = millis();
       }
     }
-    lastACSPoll = millis();
   }
 
   // Update cache at 1Hz
   if (millis() - cacheUpdated < cacheUpdateInterval) {
-    return; // Not time to update cache
+    return;
   }
 
-  // Create temporary cache for new readings
+  // Create temporary cache
   std::map<String, String> newCache;
 
-  // Reset ACS71020 validation
-  for (auto& sensor : activeSensors) {
-    if (sensor.type == "ACS71020") {
-      acsValid[sensor.address] = true;
+  // Process ACS71020 buffer
+  if (acsValid && !acsReadingsBuffer.empty() && acsReadingsBuffer.size() > 0) {
+    for (auto &sensor : activeSensors) {
+      if (sensor.type == "ACS71020") {
+        float currentSum = 0.0f;
+        float voltageSum = 0.0f;
+        float powerSum = 0.0f;
+        size_t count = acsReadingsBuffer.size();
+        for (const auto &reading : acsReadingsBuffer) {
+          currentSum += reading.current;
+          voltageSum += static_cast<float>(reading.voltage);
+          powerSum += static_cast<float>(reading.power);
+        }
+        char value[32];
+        for (const auto &cap : sensor.capabilities) {
+          char key[64];
+          snprintf(key, sizeof(key), "%s:0x%02X:%s", sensor.type.c_str(), sensor.address, cap.c_str());
+          if (cap == "Current") {
+            snprintf(value, sizeof(value), "%.2f", currentSum / count);
+            newCache[key] = value;
+          } else if (cap == "Voltage") {
+            snprintf(value, sizeof(value), "%d", static_cast<int>(voltageSum / count));
+            newCache[key] = value;
+          } else if (cap == "Power") {
+            snprintf(value, sizeof(value), "%d", static_cast<int>(powerSum / count));
+            newCache[key] = value;
+          }
+        }
+      }
+    }
+    acsReadingsBuffer.clear();
+  } else {
+    for (auto &sensor : activeSensors) {
+      if (sensor.type == "ACS71020") {
+        for (const auto &cap : sensor.capabilities) {
+          char key[64];
+          snprintf(key, sizeof(key), "%s:0x%02X:%s", sensor.type.c_str(), sensor.address, cap.c_str());
+          newCache[key] = "-1";
+        }
+      }
     }
   }
 
-  // Process ACS71020 averaged readings
-  for (auto& sensor : activeSensors) {
-    if (sensor.type == "ACS71020") {
-      std::map<String, float> averages;
-      std::map<String, int> counts;
-      for (const auto& reading : acsReadingsBuffer[sensor.address]) {
-        for (const auto& cap : sensor.capabilities) {
-          if (reading.find(cap) != reading.end()) {
-            averages[cap] += reading.at(cap);
-            counts[cap]++;
-          }
-        }
-      }
-      char value[16];
-      for (const auto& cap : sensor.capabilities) {
-        if (counts[cap] > 0) {
-          float avg = averages[cap] / counts[cap];
-          if (cap == "Current") {
-            snprintf(value, sizeof(value), "%.2f", avg); // 2 decimal places
-          } else {
-            snprintf(value, sizeof(value), "%d", static_cast<int>(avg)); // Integer
-          }
-        } else {
-          snprintf(value, sizeof(value), "-1");
-        }
-        char key[64];
-        snprintf(key, sizeof(key), "%s:0x%02X:%s", sensor.type.c_str(), sensor.address, cap.c_str());
-        newCache[key] = value;
-      }
-      acsReadingsBuffer[sensor.address].clear(); // Clear buffer
-    }
-  }
+  // Reset ACS71020 validation
+  acsValid = true;
 
   // Poll other sensors
-  for (auto& sensor : activeSensors) {
-    if (sensor.type == "ACS71020") continue; // Handled above
+  for (auto &sensor : activeSensors) {
+    if (sensor.type == "ACS71020") continue;
     std::map<String, String> readings;
     if (sensor.type == "VEML6030") {
       readings = pollVEML6030(sensor);
@@ -882,16 +863,14 @@ void pollSensors() {
       readings = pollBME280(sensor);
     } else {
       DEBUG_PRINT(1, "Unsupported sensor type: %s at 0x%02X\n", sensor.type.c_str(), sensor.address);
-      for (const auto& cap : sensor.capabilities) {
+      for (const auto &cap : sensor.capabilities) {
         char key[64];
         snprintf(key, sizeof(key), "%s:0x%02X:%s", sensor.type.c_str(), sensor.address, cap.c_str());
         newCache[key] = "-1";
       }
       continue;
     }
-
-    // Update cache
-    for (const auto& cap : sensor.capabilities) {
+    for (const auto &cap : sensor.capabilities) {
       char key[64];
       snprintf(key, sizeof(key), "%s:0x%02X:%s", sensor.type.c_str(), sensor.address, cap.c_str());
       newCache[key] = readings[cap];
@@ -906,7 +885,7 @@ void pollSensors() {
     //sendToWSClients();
     prevCache = sensorReadingsCache;
   }
-  for (const auto& pair : sensorReadingsCache) {
+  for (const auto &pair : sensorReadingsCache) {
     DEBUG_PRINT(1, "  %s: %s\n", pair.first.c_str(), pair.second.c_str());
   }
 
@@ -1770,17 +1749,61 @@ void updateProgramCache() {
 void updateOutputs() {
 }
 
+void printStatus() {
+  Serial.println("** STATUS **")
+  Serial.printf("Programs set: activeProgramA=%d, activeProgramB=%d, nextTransA=%ld, nextTransB=%ld\n",
+                activeProgramA, activeProgramB, nextTransA, nextTransB);
+  Serial.printf("Updated activeSensors with %d sensors\n", activeSensors.size());
+  for (const auto &sensor : activeSensors) {
+    Serial.print("Active Sensor: Type=");
+    Serial.print(sensor.type.c_str());
+    Serial.printf(", Address=0x%02X", sensor.address);
+    Serial.printf(", PollingInterval=%lums", sensor.maxPollingInterval);
+    Serial.print(", Capabilities=[");
+    for (size_t i = 0; i < sensor.capabilities.size(); ++i) {
+      Serial.print(sensor.capabilities[i].c_str());
+      if (i < sensor.capabilities.size() - 1) {
+        Serial.print(", ");
+      }
+    }
+    Serial.println("]");
+  }
+  for (const auto &pair : sensorReadingsCache) {
+    Serial.print("Sensors:  ");
+    Serial.print(pair.first.c_str());
+    Serial.print(": ");
+    Serial.println(pair.second.c_str());
+  }
+}
+
 void updateDebugLevel() {
   if (Serial.available() > 0) {
     String input = Serial.readStringUntil('\n');  // Read until newline
     input.trim();                                 // Remove whitespace
     if (input.length() > 0) {
-      int newLevel = input.toInt();
-      if (newLevel >= 0 && newLevel <= 3) {  // Validate range
-        debugLevel = newLevel;
-        DEBUG_PRINT(0, "Debug level set to %d\n", debugLevel);
+      if (input.equalsIgnoreCase("status")) {
+        printStatus();  // Call status function
       } else {
-        Serial.println("Invalid debug level. Use 0-3.");
+        // Try to convert to int
+        bool isNumber = true;
+        for (int i = 0; i < input.length(); i++) {
+          if (!isDigit(input[i])) {
+            isNumber = false;
+            break;
+          }
+        }
+
+        if (isNumber) {
+          int newLevel = input.toInt();
+          if (newLevel >= 0 && newLevel <= 3) {  // Validate range
+            debugLevel = newLevel;
+            DEBUG_PRINT(0, "Debug level set to %d\n", debugLevel);
+          } else {
+            Serial.println("Invalid debug level. Use 0-3.");
+          }
+        } else {
+          Serial.println("Invalid input. Use 0-3 or 'status'.");
+        }
       }
     }
   }
@@ -1893,15 +1916,13 @@ void loop() {
     time_t now = time(nullptr);
     char timeStr[50];
     strftime(timeStr, sizeof(timeStr), "%Y-%m-%d %H:%M:%S", gmtime(&now));
-    Serial.print("UTC Time: ");
-    Serial.print(timeStr);
+    DEBUG_PRINT(1, "UTC Time: %s", timeStr);
     if (wifi_connected) {
-      Serial.print(" WiFi IP address: ");
-      Serial.print(WiFi.localIP().toString());
+      DEBUG_PRINT(1, " WiFi IP address: %s", WiFi.localIP().toString().c_str());
     } else if (eth_connected) {
-      Serial.print(" Ethernet IP: " + ETH.localIP().toString());
+      DEBUG_PRINT(1, " Ethernet IP: %s", ETH.localIP().toString().c_str());
     }
-    Serial.println(" Free heap: " + String(ESP.getFreeHeap()));
+    DEBUG_PRINTLN(1, " Free heap: %lu", ESP.getFreeHeap());
     print_time_count = millis();
   }
   if (shouldCheckInternet() == 1) {
