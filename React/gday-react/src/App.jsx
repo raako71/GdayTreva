@@ -85,7 +85,7 @@ function App() {
           setIsWsReady(true);
           retryDelay = 1000;
           requestPrograms();
-          wsRef.current.send(JSON.stringify({ command: 'get_sensor_status' })); // Request sensor status on connect
+          //wsRef.current.send(JSON.stringify({ command: 'get_discovered_sensors' })); // Request discovered_sensors
         }
       };
 
@@ -133,9 +133,9 @@ function App() {
                 setTriggerStatus(data);
                 console.log("Trigger Data:", data)
                 break;
-              case 'sensor_status':
+              case 'discovered_sensors':
                 setSensors(data.sensors || []);
-                console.log('Received sensor_status:', data);           
+                console.log('Received discovered_sensors:', data);           
                 break;
               default:
                 console.warn('Unknown message type:', data.type);

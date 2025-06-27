@@ -302,7 +302,7 @@ void scanI2CSensors() {
   DEBUG_PRINT(1, "I2C scan complete. Found %d sensors.\n", detectedSensors.size());
 }
 
-// FreeRTOS task for periodic I2C scanningsendSensorStatus
+// FreeRTOS task for periodic I2C scanning
 void i2cScanTask(void *parameter) {
   while (true) {
     scanI2CSensors();
@@ -311,13 +311,13 @@ void i2cScanTask(void *parameter) {
 }
 
 SemaphoreHandle_t sensorMutex = xSemaphoreCreateMutex();
-void sendSensorStatus() {
+void sendDiscoveredSensors() {
   if (subscriber_epochs.empty()) return;
   if (xSemaphoreTake(sensorMutex, portTICK_PERIOD_MS * 1000) == pdTRUE) {
     uint32_t new_epoch = millis();
     size_t jsonSize = detectedSensors.size() * 100 + 256;
     DynamicJsonDocument doc(jsonSize);
-    doc["type"] = "sensor_status";
+    doc["type"] = "discovered_sensors";
     doc["epoch"] = new_epoch;
     JsonArray sensors = doc.createNestedArray("sensors");
     for (const auto &sensor : detectedSensors) {
@@ -350,7 +350,7 @@ void sendSensorStatus() {
 }
 
 // Sends trigger status
-void sendTriggerStatus(const std::vector<TriggerInfo> &trigger_info) {
+void sendActiveprograms(const std::vector<TriggerInfo> &trigger_info) {
   Serial.println("Sending Trigger status.");
   if (subscriber_epochs.empty()) return;
 
@@ -1024,8 +1024,8 @@ void onWsEvent(AsyncWebSocket *server, AsyncWebSocketClient *client, AwsEventTyp
         client->text(json);
       }
       subscriber_epochs[client] = 0;
-      sendTriggerStatus(last_trigger_info);
-      sendSensorStatus();
+      sendActiveprograms(last_trigger_info);
+      sendDiscoveredSensors();
       break;
     case WS_EVT_DISCONNECT:
       DEBUG_PRINT(2, "WebSocket client #%u disconnected\n", client->id());
@@ -1041,14 +1041,14 @@ void onWsEvent(AsyncWebSocket *server, AsyncWebSocketClient *client, AwsEventTyp
           if (command && strcmp(command, "subscribe_output_status") == 0) {
             subscriber_epochs[client] = 0;
             DEBUG_PRINT(1, "Client #%u subscribed to status\n", client->id());
-            sendTriggerStatus(last_trigger_info);
+            sendActiveprograms(last_trigger_info);
           } else if (command && strcmp(command, "unsubscribe_output_status") == 0) {
             subscriber_epochs.erase(client);
             DEBUG_PRINT(1, "Client #%u unsubscribed from status\n", client->id());
           } else if (command && strcmp(command, "get_output_status") == 0 || strcmp(command, "get_trigger_status") == 0) {
             sendTriggerStatus(last_trigger_info);
-          } else if (command && strcmp(command, "get_sensor_status") == 0) {
-            sendSensorStatus();
+          } else if (command && strcmp(command, "get_discovered_sensors") == 0) {
+            sendDiscoveredSensors();
           } else if (command && strcmp(command, "sync_time") == 0) {
             const char *timeStr = doc["time"].as<const char *>();
             if (timeStr) {
@@ -1986,7 +1986,7 @@ void loop() {
     checkInternetConnectivity();
   }
   if (sensorsChanged) {
-    sendSensorStatus();
+    sendDiscoveredSensors();
     sensorsChanged = false;
   }
   static unsigned long lastTimeSend = 0;
