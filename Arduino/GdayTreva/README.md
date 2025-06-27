@@ -43,3 +43,4 @@
  - 0.3: Reformat program cache and program selsection.
  - 0.3.1: Reform sensor scanning function.
  - 0.3.2: Update active sensors.
+ - 0.3.3: Active sensors works for null progs.

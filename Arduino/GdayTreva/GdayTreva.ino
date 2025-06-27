@@ -389,65 +389,110 @@ void sendTriggerStatus(const std::vector<TriggerInfo> &trigger_info) {
 
 std::vector<SensorInfo> activeSensors;
 
+// Helper function to parse hex address (e.g., "0x62" to uint8_t 0x62)
+uint8_t parseHexAddress(const String &hexStr) {
+  String cleanHex = hexStr;
+  cleanHex.replace("0x", "");
+  return (uint8_t)strtol(cleanHex.c_str(), nullptr, 16);
+}
+
+// Function to add sensor to activeSensors if unique
+bool addSensorIfUnique(const String &sensorType, uint8_t sensorAddress, const String &capability, std::vector<SensorInfo> &activeSensors) {
+  // Check if sensor already exists
+  auto it = std::find_if(activeSensors.begin(), activeSensors.end(),
+                         [&](const SensorInfo &s) {
+                           return s.type == sensorType && s.address == sensorAddress;
+                         });
+  if (it != activeSensors.end()) {
+    // Sensor exists, add capability if not already present
+    if (std::find(it->capabilities.begin(), it->capabilities.end(), capability) == it->capabilities.end()) {
+      it->capabilities.push_back(capability);
+      DEBUG_PRINT(1, "Added capability %s to existing sensor: %s at 0x%02X\n",
+                  capability.c_str(), sensorType.c_str(), sensorAddress);
+    }
+    return false;
+  }
+  // New sensor, set polling interval based on type
+  unsigned long pollingInterval = 1000;  // Default
+  if (sensorType == "VEML6030") pollingInterval = 500;
+  else if (sensorType == "ACS71020") pollingInterval = 100;
+  SensorInfo sensor = { sensorType, sensorAddress, pollingInterval, { capability } };
+  activeSensors.push_back(sensor);
+  DEBUG_PRINT(1, "Added active sensor: %s at 0x%02X with capability: %s\n",
+              sensorType.c_str(), sensorAddress, capability.c_str());
+  return true;
+}
+
 void updateActiveSensors() {
-  DEBUG_PRINT(1, "updateActiveSensors\n",
+  if (xSemaphoreTake(sensorMutex, portTICK_PERIOD_MS * 1000) != pdTRUE) {
+    DEBUG_PRINT(1, "Failed to acquire sensorMutex in updateActiveSensors\n");
+    return;
+  }
+
+  DEBUG_PRINT(1, "updateActiveSensors\n");
   activeSensors.clear();
 
-  // Helper lambda to add sensor to activeSensors if not already present
-  auto addSensorIfUnique = [&](const String &sensorType, uint8_t sensorAddress, const String &capability) {
-    // Check if sensor already exists
-    auto it = std::find_if(activeSensors.begin(), activeSensors.end(),
-                           [&](const SensorInfo &s) {
-                             return s.type == sensorType && s.address == sensorAddress;
-                           });
-    if (it == activeSensors.end()) {
-      // New sensor, create with capability in vector
-      SensorInfo sensor = { sensorType, sensorAddress, 1000, { capability } };
-      activeSensors.push_back(sensor);
-      DEBUG_PRINT(1, "Added active sensor: %s at 0x%02X with capability: %s\n",
-                  sensorType.c_str(), sensorAddress, capability.c_str());
-    } else {
-      // Existing sensor, add capability if not already present
-      if (std::find(it->capabilities.begin(), it->capabilities.end(), capability) == it->capabilities.end()) {
-        it->capabilities.push_back(capability);
-        DEBUG_PRINT(1, "Added capability %s to existing sensor: %s at 0x%02X\n",
-                    capability.c_str(), sensorType.c_str(), sensorAddress);
-      }
-    }
-  };
-
-  // Check null_program_ids for sensors
+  // Process null_program_ids
   for (const int id : null_program_ids) {
-    for (const auto &prog : ProgramCache) {
-      if (prog.id == id && prog.enabled && !prog.sensorType.isEmpty() && prog.sensorAddress != 0 && !prog.sensorCapability.isEmpty()) {
-        addSensorIfUnique(prog.sensorType, prog.sensorAddress, prog.sensorCapability);
-      }
+    DEBUG_PRINT(1, "NULL Prog ID: %d\n", id);
+    auto it = std::find_if(ProgramCache.begin(), ProgramCache.end(),
+                           [&](const ProgramDetails &p) {
+                             return p.id == id;
+                           });
+    if (it == ProgramCache.end()) {
+      DEBUG_PRINT(2, "Program %d: Not found in ProgramCache\n", id);
+      continue;
+    }
+    if (!it->enabled) {
+      DEBUG_PRINT(1, "Program %d: Disabled\n", id);
+    }
+    if (it->trigger != "Sensor") {
+      DEBUG_PRINT(1, "Program %d: Trigger is '%s', expected 'Sensor'\n", id, it->trigger.c_str());
+    }
+    if (it->sensorType.isEmpty()) {
+      DEBUG_PRINT(1, "Program %d: sensorType is empty\n", id);
+    }
+    if (it->sensorAddress == 0) {
+      DEBUG_PRINT(1, "Program %d: sensorAddress is 0 (invalid)\n", id);
+    }
+    if (it->sensorCapability.isEmpty()) {
+      DEBUG_PRINT(1, "Program %d: sensorCapability is empty\n", id);
+    }
+    if (it->enabled && it->trigger == "Sensor" && !it->sensorType.isEmpty() && it->sensorAddress != 0 && !it->sensorCapability.isEmpty()) {
+      DEBUG_PRINT(1, "Adding sensor from null_program_id %d: Type=%s, Address=0x%02X, Capability=%s\n",
+                  id, it->sensorType.c_str(), it->sensorAddress, it->sensorCapability.c_str());
+      addSensorIfUnique(it->sensorType, it->sensorAddress, it->sensorCapability, activeSensors);
     }
   }
 
-  // Check activeProgramA for sensor
+  // Process activeProgramA
   if (activeProgramA != -1) {
     auto it = std::find_if(ProgramCache.begin(), ProgramCache.end(),
                            [&](const ProgramDetails &p) {
                              return p.id == activeProgramA;
                            });
-    if (it != ProgramCache.end() && it->enabled && !it->sensorType.isEmpty() && it->sensorAddress != 0 && !it->sensorCapability.isEmpty()) {
-      addSensorIfUnique(it->sensorType, it->sensorAddress, it->sensorCapability);
+    if (it != ProgramCache.end() && it->enabled && it->trigger == "Sensor" && !it->sensorType.isEmpty() && it->sensorAddress != 0 && !it->sensorCapability.isEmpty()) {
+      DEBUG_PRINT(1, "Adding sensor from activeProgramA %d: Type=%s, Address=0x%02X, Capability=%s\n",
+                  activeProgramA, it->sensorType.c_str(), it->sensorAddress, it->sensorCapability.c_str());
+      addSensorIfUnique(it->sensorType, it->sensorAddress, it->sensorCapability, activeSensors);
     }
   }
 
-  // Check activeProgramB for sensor
+  // Process activeProgramB
   if (activeProgramB != -1) {
     auto it = std::find_if(ProgramCache.begin(), ProgramCache.end(),
                            [&](const ProgramDetails &p) {
                              return p.id == activeProgramB;
                            });
-    if (it != ProgramCache.end() && it->enabled && !it->sensorType.isEmpty() && it->sensorAddress != 0 && !it->sensorCapability.isEmpty()) {
-      addSensorIfUnique(it->sensorType, it->sensorAddress, it->sensorCapability);
+    if (it != ProgramCache.end() && it->enabled && it->trigger == "Sensor" && !it->sensorType.isEmpty() && it->sensorAddress != 0 && !it->sensorCapability.isEmpty()) {
+      DEBUG_PRINT(1, "Adding sensor from activeProgramB %d: Type=%s, Address=0x%02X, Capability=%s\n",
+                  activeProgramB, it->sensorType.c_str(), it->sensorAddress, it->sensorCapability.c_str());
+      addSensorIfUnique(it->sensorType, it->sensorAddress, it->sensorCapability, activeSensors);
     }
   }
 
   DEBUG_PRINT(1, "Updated activeSensors with %d sensors\n", activeSensors.size());
+  xSemaphoreGive(sensorMutex);
 }
 
 struct ACSReading {
@@ -884,11 +929,10 @@ void pollSensors() {
   if (sensorReadingsCache != prevCache) {
     //sendToWSClients();
     prevCache = sensorReadingsCache;
+    for (const auto &pair : sensorReadingsCache) {
+      DEBUG_PRINT(1, "  %s: %s\n", pair.first.c_str(), pair.second.c_str());
+    }
   }
-  for (const auto &pair : sensorReadingsCache) {
-    DEBUG_PRINT(1, "  %s: %s\n", pair.first.c_str(), pair.second.c_str());
-  }
-
   // Update timestamp
   cacheUpdated = millis();
 }
@@ -1733,7 +1777,8 @@ void updateProgramCache() {
       }
       if (details.output.equalsIgnoreCase("null") && details.enabled) {
         null_program_ids.push_back(details.id);
-        DEBUG_PRINT(1, "Program %d: Added to null_program_ids\n", i);
+        ProgramCache.push_back(details);
+        DEBUG_PRINT(1, "Program %d: Added to null_program_ids and Program Cache\n", i);
       } else {
         DEBUG_PRINT(3, "Program %d: Loaded, Output=%s, Enabled=%d\n", i, details.output.c_str(), details.enabled);
         ProgramCache.push_back(details);
@@ -1750,10 +1795,22 @@ void updateOutputs() {
 }
 
 void printStatus() {
-  Serial.println("** STATUS **")
+  Serial.println("** STATUS **");
   Serial.printf("Programs set: activeProgramA=%d, activeProgramB=%d, nextTransA=%ld, nextTransB=%ld\n",
                 activeProgramA, activeProgramB, nextTransA, nextTransB);
-  Serial.printf("Updated activeSensors with %d sensors\n", activeSensors.size());
+  if (null_program_ids.empty()) {
+    Serial.println("No Null programs");
+  } else {
+    Serial.print("Null Program IDs: [");
+    for (size_t i = 0; i < null_program_ids.size(); ++i) {
+      Serial.print(null_program_ids[i]);
+      if (i < null_program_ids.size() - 1) {
+        Serial.print(", ");
+      }
+    }
+    Serial.println("]");
+  }
+  Serial.printf("activeSensors has %d sensors\n", activeSensors.size());
   for (const auto &sensor : activeSensors) {
     Serial.print("Active Sensor: Type=");
     Serial.print(sensor.type.c_str());
