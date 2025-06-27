@@ -42,3 +42,4 @@ R0.39: Program Editor formatting.
 R0.40: New JSON formatting.
 R0.41: CSS.
 R0.42: More CSS, memory usage.
+R0.43: Nomenclature for active program data.

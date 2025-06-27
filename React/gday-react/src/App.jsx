@@ -15,7 +15,7 @@ function App() {
   const [isWsReady, setIsWsReady] = useState(false);
   const wsRef = useRef(null);
   const [wsServer, setWsServer] = useState(null);
-  const [triggerStatus, setTriggerStatus] = useState(null);
+  const [activeProgramData, setActiveProgramData] = useState(null);
   const [programs, setPrograms] = useState([]);
   const [sensors, setSensors] = useState([]); // New state for sensors
 
@@ -129,9 +129,9 @@ function App() {
               case 'time_offset':
                 setMessage((prev) => ({ ...prev, offset_minutes: data.offset_minutes }));
                 break;
-              case 'trigger_status':
-                setTriggerStatus(data);
-                console.log("Trigger Data:", data)
+              case 'active_program_data':
+                setActiveProgramData(data);
+                console.log("active_program_data:", data)
                 break;
               case 'discovered_sensors':
                 setSensors(data.sensors || []);
@@ -181,10 +181,10 @@ function App() {
     <div className="App">
       <TimeBar message={message} wsRef={wsRef} />
       <Routes>
-        <Route path="/" element={<Home message={message} wsRef={wsRef} isWsReady={isWsReady} triggerStatus={triggerStatus} programs={programs} />} />
+        <Route path="/" element={<Home message={message} wsRef={wsRef} isWsReady={isWsReady} activeProgramData={activeProgramData} programs={programs} />} />
         <Route path="/graph" element={<Graph />} />
         <Route path="/settings" element={<Settings requestNetworkInfo={requestNetworkInfo} networkInfo={networkInfo} connectionStatus={connectionStatus} sensors={sensors} />} />
-        <Route path="/programs" element={<Programs wsRef={wsRef} isWsReady={isWsReady} triggerStatus={triggerStatus} programs={programs} />} />
+        <Route path="/programs" element={<Programs wsRef={wsRef} isWsReady={isWsReady} programs={programs} />} />
         <Route path="/programEditor" element={<ProgramEditor wsRef={wsRef} isWsReady={isWsReady} programs={programs} sensors={sensors} />} />
       </Routes>
     </div>
