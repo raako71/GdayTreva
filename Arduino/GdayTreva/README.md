@@ -40,9 +40,10 @@
  - 0.2.6: Formatting, working on trigger status WS message.
  DEBUG logging ADDED
  working on program cache
- - 0.3: Reformat program cache and program selsection.
+ - 0.3: Reformat program cache and program selection.
  - 0.3.1: Reform sensor scanning function.
  - 0.3.2: Update active sensors.
  - 0.3.3: Active sensors works for null progs.
  - 0.3.4: Nomenclature.
  - 0.3.5: Send Sensor data, program cache.
+ - 0.3.6: Device Name.

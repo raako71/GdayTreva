@@ -79,6 +79,7 @@ struct Config {
   char ntp_server[32];
   char internet_check_host[32];
   int time_offset_minutes;
+  char device_name[26];
 };
 Config config;
 
@@ -1022,6 +1023,7 @@ void onWsEvent(AsyncWebSocket *server, AsyncWebSocketClient *client, AwsEventTyp
         StaticJsonDocument<256> doc;
         doc["type"] = "time_offset";
         doc["offset_minutes"] = config.time_offset_minutes;
+        doc["device_name"] = config.device_name;
         String json;
         serializeJson(doc, json);
         client->text(json);
@@ -1070,16 +1072,26 @@ void onWsEvent(AsyncWebSocket *server, AsyncWebSocketClient *client, AwsEventTyp
             sendProgramCache();
           } else if (command && strcmp(command, "set_time_offset") == 0) {
             int offset = 0;
+            String device_name = "";
             if (doc["offset_minutes"].is<int>()) {
               offset = doc["offset_minutes"].as<int>();
             }
+            if (doc["device_name"].is<String>()) {
+              device_name = doc["device_name"].as<String>();
+              if (device_name.length() > 25) {
+                device_name = device_name.substring(0, 25);  // Limit to 25 characters
+              }
+            }
             if (offset >= -720 && offset <= 840) {
               config.time_offset_minutes = offset;
+              strncpy(config.device_name, device_name.c_str(), 26);  // Ensure null-termination
+              config.device_name[25] = '\0';                         // Enforce max length
               saveConfiguration("/config.json", config);
-              DEBUG_PRINT(1, "Time offset updated to %d minutes\n", offset);
+              DEBUG_PRINT(1, "Time offset updated to %d minutes, device name set to %s\n", offset, config.device_name);
               StaticJsonDocument<256> response;
               response["type"] = "time_offset";
               response["offset_minutes"] = config.time_offset_minutes;
+              response["device_name"] = config.device_name;
               String json;
               serializeJson(response, json);
               ws.textAll(json);
