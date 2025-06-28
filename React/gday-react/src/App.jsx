@@ -17,7 +17,8 @@ function App() {
   const [wsServer, setWsServer] = useState(null);
   const [activeProgramData, setActiveProgramData] = useState(null);
   const [programs, setPrograms] = useState([]);
-  const [sensors, setSensors] = useState([]); // New state for sensors
+  const [sensors, setSensors] = useState([]);
+  const [programCache, setProgramCache] = useState([]); // New state for program_cache
 
   const requestNetworkInfo = useCallback(() => {
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
@@ -131,11 +132,15 @@ function App() {
                 break;
               case 'active_program_data':
                 setActiveProgramData(data);
-                console.log("active_program_data:", data)
+                //console.log("active_program_data:", data);
                 break;
               case 'discovered_sensors':
                 setSensors(data.sensors || []);
-                console.log('Received discovered_sensors:', data);           
+                //console.log('Received discovered_sensors:', data);           
+                break;
+              case 'program_cache':
+                setProgramCache(data.programs || []);
+                //console.log('Received program_cache:', data);
                 break;
               default:
                 console.warn('Unknown message type:', data.type);
@@ -181,7 +186,7 @@ function App() {
     <div className="App">
       <TimeBar message={message} wsRef={wsRef} />
       <Routes>
-        <Route path="/" element={<Home message={message} wsRef={wsRef} isWsReady={isWsReady} activeProgramData={activeProgramData} programs={programs} />} />
+        <Route path="/" element={<Home message={message} wsRef={wsRef} isWsReady={isWsReady} activeProgramData={activeProgramData} programs={programs} programCache={programCache} />} />
         <Route path="/graph" element={<Graph />} />
         <Route path="/settings" element={<Settings requestNetworkInfo={requestNetworkInfo} networkInfo={networkInfo} connectionStatus={connectionStatus} sensors={sensors} />} />
         <Route path="/programs" element={<Programs wsRef={wsRef} isWsReady={isWsReady} programs={programs} />} />
