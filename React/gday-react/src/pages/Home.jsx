@@ -129,7 +129,7 @@ function Home({ activeProgramData, programCache, message }) {
   return (
     <div>
       <div className="Title">
-        <h1>Home Page</h1>
+        <h1>{message.device_name || 'Home Page'}</h1>
       </div>
       <div className="Tile-container">
         {programTiles}
@@ -184,13 +184,14 @@ Home.propTypes = {
     mem_used: PropTypes.number,
     mem_total: PropTypes.number,
     type: PropTypes.string,
+    device_name: PropTypes.string, // Added for device_name
   }),
 };
 
 Home.defaultProps = {
   activeProgramData: { progs: [], sensors: [] },
   programCache: [],
-  message: { epoch: 0 },
+  message: { epoch: 0, device_name: '' }, // Added device_name default
 };
 
 export default Home;

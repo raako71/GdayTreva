@@ -9,7 +9,7 @@ import ProgramEditor from './pages/ProgramEditor';
 import './styles.css';
 
 function App() {
-  const [message, setMessage] = useState({ epoch: 0, offset_minutes: 0, mem_used: 0, mem_total: 0 });
+  const [message, setMessage] = useState({ epoch: 0, offset_minutes: 0, mem_used: 0, mem_total: 0, device_name: '' });
   const [networkInfo, setNetworkInfo] = useState(null);
   const [connectionStatus, setConnectionStatus] = useState('Attempting to connect...');
   const [isWsReady, setIsWsReady] = useState(false);
@@ -18,7 +18,7 @@ function App() {
   const [activeProgramData, setActiveProgramData] = useState(null);
   const [programs, setPrograms] = useState([]);
   const [sensors, setSensors] = useState([]);
-  const [programCache, setProgramCache] = useState([]); // New state for program_cache
+  const [programCache, setProgramCache] = useState([]);
 
   const requestNetworkInfo = useCallback(() => {
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
@@ -86,7 +86,7 @@ function App() {
           setIsWsReady(true);
           retryDelay = 1000;
           requestPrograms();
-          //wsRef.current.send(JSON.stringify({ command: 'get_discovered_sensors' })); // Request discovered_sensors
+          //wsRef.current.send(JSON.stringify({ command: 'get_discovered_sensors' }));
         }
       };
 
@@ -100,7 +100,15 @@ function App() {
             }
             switch (data.type) {
               case 'time':
-                setMessage(data);
+                setMessage((prev) => ({ ...prev, ...data }));
+                break;
+              case 'time_offset':
+                setMessage((prev) => ({
+                  ...prev,
+                  offset_minutes: data.offset_minutes,
+                  device_name: data.device_name || prev.device_name || '',
+                }));
+                //console.log('Received time_offset:', data);
                 break;
               case 'network_info':
                 setNetworkInfo(data);
@@ -127,16 +135,13 @@ function App() {
                   });
                 }
                 break;
-              case 'time_offset':
-                setMessage((prev) => ({ ...prev, offset_minutes: data.offset_minutes }));
-                break;
               case 'active_program_data':
                 setActiveProgramData(data);
-                //console.log("active_program_data:", data);
+                //console.log('active_program_data:', data);
                 break;
               case 'discovered_sensors':
                 setSensors(data.sensors || []);
-                //console.log('Received discovered_sensors:', data);           
+                //console.log('Received discovered_sensors:', data);
                 break;
               case 'program_cache':
                 setProgramCache(data.programs || []);

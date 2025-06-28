@@ -1,6 +1,6 @@
 import '../styles.css';
 import { Link } from 'react-router-dom';
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import PropTypes from 'prop-types';
 
 function TimeBar({ message, wsRef }) {
@@ -8,10 +8,18 @@ function TimeBar({ message, wsRef }) {
   const [isOverlayOpen, setIsOverlayOpen] = useState(false);
   const [offsetError, setOffsetError] = useState(null);
   const [isMemoryTooltipOpen, setIsMemoryTooltipOpen] = useState(false);
+  const [deviceName, setDeviceName] = useState(''); // State for device name input
   const timeoutRef = useRef(null);
   const menuRef = useRef(null);
   const buttonRef = useRef(null);
   const memoryRef = useRef(null);
+
+  // Update deviceName when overlay opens or message.device_name changes
+  useEffect(() => {
+    if (isOverlayOpen && message?.device_name) {
+      setDeviceName(message.device_name.slice(0, 25)); // Ensure max 25 chars
+    }
+  }, [isOverlayOpen, message?.device_name]);
 
   // Format time with ESP32's offset
   const formatTime = (epoch, offsetMinutes) => {
@@ -115,6 +123,9 @@ function TimeBar({ message, wsRef }) {
   const toggleOverlay = () => {
     setIsOverlayOpen(!isOverlayOpen);
     setOffsetError(null);
+    if (!isOverlayOpen) {
+      setDeviceName(message?.device_name || ''); // Set initial device name when opening
+    }
     if (isMenuOpen) setIsMenuOpen(false);
   };
 
@@ -128,14 +139,23 @@ function TimeBar({ message, wsRef }) {
     const message = {
       command: 'set_time_offset',
       offset_minutes: browserOffset,
+      device_name: deviceName.slice(0, 25), // Limit to 25 characters
     };
     try {
       console.log('Sending set_time_offset:', message);
       wsRef.current.send(JSON.stringify(message));
       setIsOverlayOpen(false);
+      setDeviceName(''); // Clear input after sending
     } catch (error) {
-      setOffsetError('Failed to update offset');
+      setOffsetError('Failed to update offset or device name');
       console.error('Error sending set_time_offset:', error);
+    }
+  };
+
+  const handleDeviceNameChange = (e) => {
+    const value = e.target.value;
+    if (value.length <= 25) {
+      setDeviceName(value);
     }
   };
 
@@ -266,6 +286,17 @@ function TimeBar({ message, wsRef }) {
             <p className={isOffsetMismatch ? 'offset-mismatch' : ''}>ESP32 Time Offset: {formatOffset(message?.offset_minutes)}</p>
             <p>Local Browser Offset: {formatOffset(browserOffset)}</p>
             <p>Update ESP32 offset to local browser time?</p>
+            <label>
+              Device Name:{'   '}
+              <input
+                type="text"
+                value={deviceName}
+                onChange={handleDeviceNameChange}
+                maxLength={25}
+                placeholder="Enter device name (max 25 chars)"
+                className="device-name-input"
+              />
+            </label>
             {offsetError && <p className="overlay-error">{offsetError}</p>}
             <div className="overlay-buttons">
               <button
@@ -296,6 +327,7 @@ TimeBar.propTypes = {
     mem_total: PropTypes.number,
     mem_used: PropTypes.number,
     millis: PropTypes.number,
+    device_name: PropTypes.string,
   }),
   wsRef: PropTypes.shape({
     current: PropTypes.instanceOf(WebSocket),
