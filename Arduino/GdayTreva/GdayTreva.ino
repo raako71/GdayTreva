@@ -52,12 +52,25 @@ const char *OTA_PASSWORD = "admin";
 // OTA Progress Tracking
 static unsigned long otaProgressMillis = 0;
 
-// Global variables
+struct ACSReading {
+  float current;  // Amperes, 2 decimal places
+  int voltage;    // Volts, integer
+  int power;      // Watts, integer
+};
 
+// Global variables
 std::vector<String> logBuffer;
 unsigned long lastLogWrite = 0;
 time_t nextTransA, nextTransB;
 int activeProgramA = -1, activeProgramB = -1;
+std::map<String, String> sensorReadingsCache;
+std::map<String, String> prevCache;
+unsigned long cacheUpdated = 0;
+std::vector<ACSReading> acsReadingsBuffer;
+bool acsValid = true;
+unsigned long lastACSPoll = 0;
+const unsigned long cacheUpdateInterval = 1000;
+const unsigned long acsPollInterval = 100;
 
 struct Config {
   char ssid[32];
@@ -123,7 +136,6 @@ struct TriggerInfo {
     return id == other.id && output == other.output && trigger == other.trigger && next_toggle == other.next_toggle && sensor_value == other.sensor_value && state == other.state;
   }
 };
-std::vector<TriggerInfo> last_trigger_info;
 
 bool sensorsChanged = false;
 
@@ -134,6 +146,7 @@ struct PriorityResult {
 
 // Program scheduling structs
 struct ProgramDetails {
+  String name;
   int id;
   bool enabled;
   String output;
@@ -349,34 +362,40 @@ void sendDiscoveredSensors() {
   }
 }
 
-// Sends trigger status
-void sendActiveprograms(const std::vector<TriggerInfo> &trigger_info) {
-  Serial.println("Sending Trigger status.");
+void sendActiveprograms() {
+  Serial.println("Sending Active Program Data.");
   if (subscriber_epochs.empty()) return;
 
   uint32_t new_epoch = millis();
   StaticJsonDocument<512> doc;
-  doc["type"] = "trigger_status";
+  doc["type"] = "active_program_data";
   doc["epoch"] = new_epoch;
 
-  JsonArray progs = doc.createNestedArray("progs");
-  for (const auto &info : trigger_info) {
-    JsonObject prog = progs.createNestedObject();
-    prog["id"] = info.id;
-    prog["output"] = info.output;
-    prog["trigger"] = info.trigger;
-    if (info.output == "A" || info.output == "B") {
-      prog["state"] = info.state;
-    }
-    if ((info.trigger == "Cycle Timer") && info.next_toggle > 0) {
-      prog["next_toggle"] = info.next_toggle;
-    } else if (info.output == "Null" && info.trigger != "Manual" && !info.sensor_value.isEmpty()) {
-      prog["value"] = info.sensor_value;
+  JsonArray sensors = doc.createNestedArray("sensors");
+  for (const auto &pair : sensorReadingsCache) {
+    JsonObject sensor = sensors.createNestedObject();
+    // Parse key (e.g., "ACS71020:0x62:Power") into type, address, capability
+    String key = pair.first;
+    int colon1 = key.indexOf(':');
+    int colon2 = key.lastIndexOf(':');
+    if (colon1 != -1 && colon2 != -1 && colon1 != colon2) {
+      String type = key.substring(0, colon1);
+      String address = key.substring(colon1 + 1, colon2);
+      String capability = key.substring(colon2 + 1);
+      sensor["type"] = type;
+      sensor["address"] = address;
+      sensor["capability"] = capability;
+      sensor["value"] = pair.second;
+    } else {
+      // Fallback if key format is invalid
+      sensor["key"] = key;
+      sensor["value"] = pair.second;
     }
   }
 
   String json;
   serializeJson(doc, json);
+  DEBUG_PRINT(2, "JSON to send: %s\n", json.c_str());
 
   for (auto &pair : subscriber_epochs) {
     if (new_epoch > pair.second) {
@@ -386,7 +405,6 @@ void sendActiveprograms(const std::vector<TriggerInfo> &trigger_info) {
     }
   }
 }
-
 std::vector<SensorInfo> activeSensors;
 
 // Helper function to parse hex address (e.g., "0x62" to uint8_t 0x62)
@@ -494,22 +512,6 @@ void updateActiveSensors() {
   DEBUG_PRINT(1, "Updated activeSensors with %d sensors\n", activeSensors.size());
   xSemaphoreGive(sensorMutex);
 }
-
-struct ACSReading {
-  float current;  // Amperes, 2 decimal places
-  int voltage;    // Volts, integer
-  int power;      // Watts, integer
-};
-
-// Global variables
-std::map<String, String> sensorReadingsCache;
-std::map<String, String> prevCache;
-unsigned long cacheUpdated = 0;
-std::vector<ACSReading> acsReadingsBuffer;
-bool acsValid = true;
-unsigned long lastACSPoll = 0;
-const unsigned long cacheUpdateInterval = 1000;
-const unsigned long acsPollInterval = 100;
 
 // Polling function for VEML6030
 std::map<String, String> pollVEML6030(SensorInfo &sensor) {
@@ -932,6 +934,7 @@ void pollSensors() {
     for (const auto &pair : sensorReadingsCache) {
       DEBUG_PRINT(1, "  %s: %s\n", pair.first.c_str(), pair.second.c_str());
     }
+    sendActiveprograms();
   }
   // Update timestamp
   cacheUpdated = millis();
@@ -1024,8 +1027,9 @@ void onWsEvent(AsyncWebSocket *server, AsyncWebSocketClient *client, AwsEventTyp
         client->text(json);
       }
       subscriber_epochs[client] = 0;
-      sendActiveprograms(last_trigger_info);
+      sendActiveprograms();
       sendDiscoveredSensors();
+      sendProgramCache();
       break;
     case WS_EVT_DISCONNECT:
       DEBUG_PRINT(2, "WebSocket client #%u disconnected\n", client->id());
@@ -1041,12 +1045,12 @@ void onWsEvent(AsyncWebSocket *server, AsyncWebSocketClient *client, AwsEventTyp
           if (command && strcmp(command, "subscribe_output_status") == 0) {
             subscriber_epochs[client] = 0;
             DEBUG_PRINT(1, "Client #%u subscribed to status\n", client->id());
-            sendActiveprograms(last_trigger_info);
+            sendActiveprograms();
           } else if (command && strcmp(command, "unsubscribe_output_status") == 0) {
             subscriber_epochs.erase(client);
             DEBUG_PRINT(1, "Client #%u unsubscribed from status\n", client->id());
           } else if (command && strcmp(command, "get_output_status") == 0 || strcmp(command, "get_trigger_status") == 0) {
-            sendTriggerStatus(last_trigger_info);
+            sendActiveprograms();
           } else if (command && strcmp(command, "get_discovered_sensors") == 0) {
             sendDiscoveredSensors();
           } else if (command && strcmp(command, "sync_time") == 0) {
@@ -1062,6 +1066,8 @@ void onWsEvent(AsyncWebSocket *server, AsyncWebSocketClient *client, AwsEventTyp
             const char *programID = doc["programID"].as<const char *>();
             if (programID) handleGetProgram(client, programID);
             else sendErrorResponse(client, "", "Missing programID");
+          } else if (command && strcmp(command, "get_program_cache") == 0) {
+            sendProgramCache();
           } else if (command && strcmp(command, "set_time_offset") == 0) {
             int offset = 0;
             if (doc["offset_minutes"].is<int>()) {
@@ -1745,6 +1751,7 @@ void updateProgramCache() {
 
       ProgramDetails details;
       details.id = i;
+      details.name = doc["name"].as<String>();
       details.enabled = doc["enabled"].as<bool>();
       details.output = doc["output"].as<String>() ?: "null";
       details.startDate = doc["startDate"].as<String>();
@@ -1789,6 +1796,67 @@ void updateProgramCache() {
   }
   DEBUG_PRINTLN(1, "Program cache updated.");
   setProgramPriorities(now);
+  sendProgramCache();
+}
+
+void sendProgramCache() {
+  if (subscriber_epochs.empty()) return;
+
+  uint32_t new_epoch = millis();
+  // Estimate JSON size: ~300 bytes per program + overhead
+  size_t jsonSize = ProgramCache.size() * 300 + 256;
+  DynamicJsonDocument doc(jsonSize);
+  doc["type"] = "program_cache";
+  doc["epoch"] = new_epoch;
+
+  JsonArray programs = doc.createNestedArray("programs");
+  for (const auto &prog : ProgramCache) {
+    JsonObject progObj = programs.createNestedObject();
+    progObj["id"] = prog.id;
+    progObj["name"] = prog.name;
+    progObj["enabled"] = prog.enabled;
+    progObj["output"] = prog.output;
+    progObj["startDate"] = prog.startDate;
+    progObj["startDateEnabled"] = prog.startDateEnabled;
+    progObj["endDate"] = prog.endDate;
+    progObj["endDateEnabled"] = prog.endDateEnabled;
+    progObj["startTime"] = prog.startTime;
+    progObj["startTimeEnabled"] = prog.startTimeEnabled;
+    progObj["endTime"] = prog.endTime;
+    progObj["endTimeEnabled"] = prog.endTimeEnabled;
+    JsonArray days = progObj.createNestedArray("selectedDays");
+    for (const auto &day : prog.selectedDays) {
+      days.add(day);
+    }
+    progObj["daysPerWeekEnabled"] = prog.daysPerWeekEnabled;
+    progObj["trigger"] = prog.trigger;
+    progObj["sensorType"] = prog.sensorType;
+    char addrStr[5];
+    snprintf(addrStr, sizeof(addrStr), "0x%02X", prog.sensorAddress);
+    progObj["sensorAddress"] = addrStr;
+    progObj["sensorCapability"] = prog.sensorCapability;
+    JsonObject cycle = progObj.createNestedObject("cycleConfig");
+    cycle["runSeconds"] = prog.cycleConfig.runSeconds;
+    cycle["stopSeconds"] = prog.cycleConfig.stopSeconds;
+    cycle["startHigh"] = prog.cycleConfig.startHigh;
+    cycle["valid"] = prog.cycleConfig.valid;
+  }
+
+  char buffer[4096];
+  size_t len = serializeJson(doc, buffer, sizeof(buffer));
+  if (len == 0) {
+    Serial.println("ProgramCache JSON serialization failed");
+    return;
+  }
+
+  for (auto &pair : subscriber_epochs) {
+    if (new_epoch > pair.second) {
+      pair.first->text(buffer);
+      pair.second = new_epoch;
+      DEBUG_PRINT(1, "Sent program_cache to client #%u\n", pair.first->id());
+    }
+  }
+  Serial.println("Sent ProgramCache data");
 }
 
 void updateOutputs() {
