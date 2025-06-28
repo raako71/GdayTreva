@@ -82,13 +82,13 @@ function Home({ activeProgramData, programCache, message }) {
         const programName = prog.name || `Program${programId}`;
         
         // Determine trigger display
-        const triggerDisplay = prog.trigger === 'Sensor' && prog.sensorType
-          ? `${prog.sensorType} ${prog.sensorAddress || ''} ${prog.sensorCapability || ''}`.trim()
+        const triggerDisplay = prog.trigger === 'Sensor' && prog.sensorCapability
+          ? `Capability: ${prog.sensorCapability}`
           : prog.trigger || 'Unknown';
 
         // Determine state from activeProgramData
         const activeProg = activeProgramData?.progs?.find((p) => p.id === prog.id);
-        const state = activeProg ? (activeProg.state ? 'ON' : 'OFF') : 'Unknown';
+        const state = activeProg && activeProg.state !== undefined ? (activeProg.state ? 'ON' : 'OFF') : null;
 
         // Find sensor value for sensor-triggered programs
         let sensorValue = 'N/A';
@@ -109,9 +109,9 @@ function Home({ activeProgramData, programCache, message }) {
                 {programName}
               </Link>
             </h2>
-            <p>Output: {prog.output || 'None'}</p>
-            <p>State: {state}</p>
-            <p>Trigger: {triggerDisplay}</p>
+            {prog.output && <p>Output: {prog.output}</p>}
+            {state && <p>State: {state}</p>}
+            <p>{triggerDisplay}</p>
             {prog.trigger === 'Sensor' && (
               <p>Sensor Value: {sensorValue}</p>
             )}
