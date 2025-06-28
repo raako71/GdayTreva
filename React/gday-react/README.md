@@ -44,3 +44,4 @@ R0.41: CSS.
 R0.42: More CSS, memory usage.
 R0.43: Nomenclature for active program data.
 R0.44: Use program cache for widgets.
+R0.45: Show sensor data in widgets.

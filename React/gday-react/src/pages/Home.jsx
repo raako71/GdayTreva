@@ -90,6 +90,18 @@ function Home({ activeProgramData, programCache, message }) {
         const activeProg = activeProgramData?.progs?.find((p) => p.id === prog.id);
         const state = activeProg ? (activeProg.state ? 'ON' : 'OFF') : 'Unknown';
 
+        // Find sensor value for sensor-triggered programs
+        let sensorValue = 'N/A';
+        if (prog.trigger === 'Sensor' && prog.sensorType && prog.sensorAddress && prog.sensorCapability) {
+          const sensor = activeProgramData?.sensors?.find(
+            (s) =>
+              s.type === prog.sensorType &&
+              s.address === prog.sensorAddress &&
+              s.capability === prog.sensorCapability
+          );
+          sensorValue = sensor ? sensor.value : 'N/A';
+        }
+
         return (
           <div key={prog.id} className="Tile">
             <h2>
@@ -100,6 +112,9 @@ function Home({ activeProgramData, programCache, message }) {
             <p>Output: {prog.output || 'None'}</p>
             <p>State: {state}</p>
             <p>Trigger: {triggerDisplay}</p>
+            {prog.trigger === 'Sensor' && (
+              <p>Sensor Value: {sensorValue}</p>
+            )}
             {prog.trigger === 'Cycle Timer' && prog.cycleConfig?.valid && (
               <p>
                 Next Toggle:{' '}
@@ -136,6 +151,14 @@ Home.propTypes = {
         state: PropTypes.bool,
       })
     ),
+    sensors: PropTypes.arrayOf(
+      PropTypes.shape({
+        type: PropTypes.string,
+        address: PropTypes.string,
+        capability: PropTypes.string,
+        value: PropTypes.string,
+      })
+    ),
   }),
   programCache: PropTypes.arrayOf(
     PropTypes.shape({
@@ -165,7 +188,7 @@ Home.propTypes = {
 };
 
 Home.defaultProps = {
-  activeProgramData: { progs: [] },
+  activeProgramData: { progs: [], sensors: [] },
   programCache: [],
   message: { epoch: 0 },
 };
