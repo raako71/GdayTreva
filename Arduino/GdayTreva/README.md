@@ -46,4 +46,5 @@
  - 0.3.3: Active sensors works for null progs.
  - 0.3.4: Nomenclature.
  - 0.3.5: Send Sensor data, program cache.
- - 0.3.6: Device Name.
+ - 0.3.6: Device Name. 28 Jun 25
+ - 0.3.7: Refresh-sensors. 29 Jun 25

@@ -324,6 +324,14 @@ void i2cScanTask(void *parameter) {
   }
 }
 
+static unsigned long lastSensorRequest = 0;
+void requestSensorScan(){
+  if (millis() - lastSensorRequest > 5000) {
+  scanI2CSensors();
+  lastSensorRequest = millis();
+  }
+}
+
 SemaphoreHandle_t sensorMutex = xSemaphoreCreateMutex();
 void sendDiscoveredSensors() {
   if (subscriber_epochs.empty()) return;
@@ -364,9 +372,8 @@ void sendDiscoveredSensors() {
 }
 
 void sendActiveprograms() {
-  Serial.println("Sending Active Program Data.");
   if (subscriber_epochs.empty()) return;
-
+  DEBUG_PRINTLN(3, "Sending Active Program Data.");
   uint32_t new_epoch = millis();
   StaticJsonDocument<512> doc;
   doc["type"] = "active_program_data";
@@ -396,13 +403,13 @@ void sendActiveprograms() {
 
   String json;
   serializeJson(doc, json);
-  DEBUG_PRINT(2, "JSON to send: %s\n", json.c_str());
+  DEBUG_PRINT(3, "JSON to send: %s\n", json.c_str());
 
   for (auto &pair : subscriber_epochs) {
     if (new_epoch > pair.second) {
       pair.first->text(json);
       pair.second = new_epoch;
-      DEBUG_PRINT(1, "Sent trigger_status to client #%u\n", pair.first->id());
+      DEBUG_PRINT(2, "Sent trigger_status to client #%u\n", pair.first->id());
     }
   }
 }
@@ -933,7 +940,7 @@ void pollSensors() {
     //sendToWSClients();
     prevCache = sensorReadingsCache;
     for (const auto &pair : sensorReadingsCache) {
-      DEBUG_PRINT(1, "  %s: %s\n", pair.first.c_str(), pair.second.c_str());
+      DEBUG_PRINT(2, "  %s: %s\n", pair.first.c_str(), pair.second.c_str());
     }
     sendActiveprograms();
   }
@@ -1070,6 +1077,8 @@ void onWsEvent(AsyncWebSocket *server, AsyncWebSocketClient *client, AwsEventTyp
             else sendErrorResponse(client, "", "Missing programID");
           } else if (command && strcmp(command, "get_program_cache") == 0) {
             sendProgramCache();
+          } else if (command && strcmp(command, "refresh-sensors") == 0) {
+            requestSensorScan();
           } else if (command && strcmp(command, "set_time_offset") == 0) {
             int offset = 0;
             String device_name = "";
@@ -1256,7 +1265,7 @@ void handleSaveProgram(AsyncWebSocketClient *client, const JsonDocument &doc) {
 
     if (serializeJson(contentDoc, file) == 0) {
       file.close();
-      xSemaphoreGive(littlefsMutex);
+      xSemaphoreGive(littlefsMutex);  
       sendProgramResponse(client, false, "Failed to write program", targetID.c_str());
       return;
     }
