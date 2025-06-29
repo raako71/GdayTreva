@@ -293,7 +293,7 @@ function TimeBar({ message, wsRef }) {
                 value={deviceName}
                 onChange={handleDeviceNameChange}
                 maxLength={25}
-                placeholder="Enter device name (max 25 chars)"
+                placeholder="Device name -25 chars max"
                 className="device-name-input"
               />
             </label>

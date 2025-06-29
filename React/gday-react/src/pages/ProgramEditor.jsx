@@ -3,7 +3,7 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import '../styles.css';
 import PropTypes from 'prop-types';
 
-function ProgramEditor({ wsRef, isWsReady, programs, sensors }) {
+function ProgramEditor({ wsRef, isWsReady, programCache, sensors }) {
   const [programID, setProgramID] = useState('00');
   const [name, setName] = useState('');
   const [enabled, setEnabled] = useState(false);
@@ -63,10 +63,7 @@ function ProgramEditor({ wsRef, isWsReady, programs, sensors }) {
     if (id) {
       const parsedID = parseInt(id, 10);
       if (!isNaN(parsedID) && parsedID >= 1 && parsedID <= 10) {
-        const formattedID = parsedID.toString().padStart(2, '0');
-        setProgramID(formattedID);
-
-        const program = programs.find((p) => p.id === formattedID);
+        const program = programCache.find((p) => p.id === parsedID);
         if (program) {
           setName(program.name || '');
           setEnabled(program.enabled || false);
@@ -111,16 +108,16 @@ function ProgramEditor({ wsRef, isWsReady, programs, sensors }) {
             hours: program.stopTime?.hours?.toString() || '',
           });
           setStartHigh(program.startHigh !== false);
-          setStatus(`Loaded program ${formattedID}`);
+          setStatus(`Loaded program ${parsedID}`);
           setError(null);
         } else {
-          setError(`Program with ID ${formattedID} not found`);
+          setError(`Program with ID ${parsedID} not found`);
         }
       } else {
         setError('Invalid programID in URL (must be 1 to 10)');
       }
     }
-  }, [location, programs]);
+  }, [location, programCache]);
 
   useEffect(() => {
     if (!wsRef.current) return;
@@ -278,7 +275,7 @@ function ProgramEditor({ wsRef, isWsReady, programs, sensors }) {
   const cancelEdit = () => {
     setError(null);
     setStatus('');
-    navigate('/programs');
+    navigate(-1);
   };
 
   const handleImport = () => {
@@ -759,7 +756,7 @@ ProgramEditor.propTypes = {
     current: PropTypes.instanceOf(WebSocket),
   }).isRequired,
   isWsReady: PropTypes.bool.isRequired,
-  programs: PropTypes.arrayOf(
+  programCache: PropTypes.arrayOf(
     PropTypes.shape({
       id: PropTypes.string.isRequired,
       name: PropTypes.string,

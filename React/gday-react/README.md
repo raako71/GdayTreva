@@ -42,8 +42,9 @@ R0.39: Program Editor formatting.
 R0.40: New JSON formatting.
 R0.41: CSS.
 R0.42: More CSS, memory usage.
-R0.43: Nomenclature for active program data.
+R0.43: Nomenclature for active program data. 27 Jun 25
 R0.44: Use program cache for widgets.
 R0.45: Show sensor data in widgets.
 R0.46: Refine widget formatting.
-R0.47: Device Name.
+R0.47: Device Name. 28 Jun 25
+R0.48: Use Program Cache for web ui. 29 Jun 25

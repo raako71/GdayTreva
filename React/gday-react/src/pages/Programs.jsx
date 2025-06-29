@@ -2,7 +2,7 @@ import { Link } from 'react-router-dom';
 import PropTypes from 'prop-types';
 import '../styles.css';
 
-function Programs({ programs }) {
+function Programs({ programCache }) {
   return (
     <div>
       <div className="Title">
@@ -17,12 +17,12 @@ function Programs({ programs }) {
               </tr>
             </thead>
             <tbody>
-              {programs.length === 0 ? (
+              {programCache.length === 0 ? (
                 <tr>
                   <td>No programs found</td>
                 </tr>
               ) : (
-                programs.map((program) => (
+                programCache.map((program) => (
                   <tr key={program.id}>
                     <td>
                       <Link to={`/programEditor?programID=${program.id}`}>
@@ -45,10 +45,10 @@ function Programs({ programs }) {
 }
 
 Programs.propTypes = {
-  programs: PropTypes.arrayOf(
+  programCache: PropTypes.arrayOf(
     PropTypes.shape({
-      id: PropTypes.string.isRequired,
-      name: PropTypes.string,
+      id: PropTypes.number.isRequired,
+      name: PropTypes.string
     })
   ).isRequired,
 };

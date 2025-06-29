@@ -16,7 +16,6 @@ function App() {
   const wsRef = useRef(null);
   const [wsServer, setWsServer] = useState(null);
   const [activeProgramData, setActiveProgramData] = useState(null);
-  const [programs, setPrograms] = useState([]);
   const [sensors, setSensors] = useState([]);
   const [programCache, setProgramCache] = useState([]);
 
@@ -25,17 +24,6 @@ function App() {
       wsRef.current.send(JSON.stringify({ command: 'get_network_info' }));
     } else {
       console.warn('WebSocket not connected, cannot request network info');
-    }
-  }, []);
-
-  const requestPrograms = useCallback(() => {
-    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-      for (let i = 1; i <= 10; i++) {
-        const id = i.toString().padStart(2, '0');
-        wsRef.current.send(JSON.stringify({ command: 'get_program', programID: id }));
-      }
-    } else {
-      console.warn('WebSocket not connected, cannot request programs');
     }
   }, []);
 
@@ -85,7 +73,6 @@ function App() {
           setConnectionStatus('Connected');
           setIsWsReady(true);
           retryDelay = 1000;
-          requestPrograms();
           //wsRef.current.send(JSON.stringify({ command: 'get_discovered_sensors' }));
         }
       };
@@ -117,22 +104,6 @@ function App() {
                 console.log('Save program response:', data);
                 if (data.success && data.programID) {
                   wsRef.current.send(JSON.stringify({ command: 'get_program', programID: data.programID }));
-                }
-                break;
-              case 'get_program_response':
-                if (data.success && data.content) {
-                  const content = JSON.parse(data.content);
-                  setPrograms((prev) => {
-                    if (prev.some((p) => p.id === data.programID)) {
-                      return prev.map((p) =>
-                        p.id === data.programID ? { ...p, ...content, id: data.programID } : p
-                      );
-                    }
-                    return [
-                      ...prev,
-                      { id: data.programID, ...content },
-                    ];
-                  });
                 }
                 break;
               case 'active_program_data':
@@ -185,17 +156,17 @@ function App() {
       clearTimeout(reconnectTimeout);
       if (wsRef.current) wsRef.current.close();
     };
-  }, [wsServer, requestPrograms]);
+  }, [wsServer]);
 
   return (
     <div className="App">
       <TimeBar message={message} wsRef={wsRef} />
       <Routes>
-        <Route path="/" element={<Home message={message} wsRef={wsRef} isWsReady={isWsReady} activeProgramData={activeProgramData} programs={programs} programCache={programCache} />} />
+        <Route path="/" element={<Home message={message} wsRef={wsRef} isWsReady={isWsReady} activeProgramData={activeProgramData} programCache={programCache} />} />
         <Route path="/graph" element={<Graph />} />
         <Route path="/settings" element={<Settings requestNetworkInfo={requestNetworkInfo} networkInfo={networkInfo} connectionStatus={connectionStatus} sensors={sensors} />} />
-        <Route path="/programs" element={<Programs wsRef={wsRef} isWsReady={isWsReady} programs={programs} />} />
-        <Route path="/programEditor" element={<ProgramEditor wsRef={wsRef} isWsReady={isWsReady} programs={programs} sensors={sensors} />} />
+        <Route path="/programs" element={<Programs wsRef={wsRef} isWsReady={isWsReady} programCache={programCache}/>} />
+        <Route path="/programEditor" element={<ProgramEditor wsRef={wsRef} isWsReady={isWsReady} sensors={sensors} programCache={programCache}/>} />
       </Routes>
     </div>
   );
