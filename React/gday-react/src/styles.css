@@ -140,6 +140,11 @@ table {
   color: rgba(255, 255, 255, 0.87);
 }
 
+.text-input{
+  max-width: 200px;
+  height: 25px;
+}
+
 .input-field[type="date"]::-webkit-calendar-picker-indicator,
 .input-field[type="time"]::-webkit-calendar-picker-indicator {
   filter: invert(1);

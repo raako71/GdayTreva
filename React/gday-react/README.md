@@ -48,3 +48,4 @@ R0.45: Show sensor data in widgets.
 R0.46: Refine widget formatting.
 R0.47: Device Name. 28 Jun 25
 R0.48: Use Program Cache for web ui. 29 Jun 25
+R0.49: refresh-sensors, 25 char limit for text fields, default empty trigger option.

@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import PropTypes from 'prop-types';
 import '../styles.css';
 
-function Settings({ requestNetworkInfo, networkInfo, connectionStatus, sensors }) {
+function Settings({ requestNetworkInfo, networkInfo, connectionStatus, sensors, refreshSensors }) {
   const [isWaitingForData, setIsWaitingForData] = useState(false);
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [hasRequested, setHasRequested] = useState(false);
@@ -102,6 +102,15 @@ function Settings({ requestNetworkInfo, networkInfo, connectionStatus, sensors }
           ) : (
             <div>No sensors detected</div>
           )}
+          <button
+          className="save-button"
+            onClick={() => {
+              console.log('Requesting sensor scan');
+              refreshSensors();
+            }}
+          >
+            Rescan for sensors
+          </button>
         </div>
       </div>
     </div>

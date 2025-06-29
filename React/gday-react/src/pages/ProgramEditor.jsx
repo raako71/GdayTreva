@@ -19,7 +19,7 @@ function ProgramEditor({ wsRef, isWsReady, programCache, sensors }) {
   const [endTimeEnabled, setEndTimeEnabled] = useState(true);
   const [selectedDays, setSelectedDays] = useState([]);
   const [daysPerWeekEnabled, setDaysPerWeekEnabled] = useState(true);
-  const [triggerType, setTriggerType] = useState('Manual');
+  const [triggerType, setTriggerType] = useState(''); // Default to empty for new programs
   const [sensorType, setSensorType] = useState('');
   const [sensorAddress, setSensorAddress] = useState('');
   const [sensorCapability, setSensorCapability] = useState('');
@@ -42,8 +42,9 @@ function ProgramEditor({ wsRef, isWsReady, programCache, sensors }) {
     'Sunday',
   ];
 
-  // Define trigger options
+  // Define trigger options with default option
   const standardTriggers = [
+    { value: '', label: 'Select Trigger' }, // Default option
     { value: 'Manual', label: 'Manual' },
     { value: 'Cycle Timer', label: 'Cycle Timer' },
   ];
@@ -54,7 +55,7 @@ function ProgramEditor({ wsRef, isWsReady, programCache, sensors }) {
     }))
   );
   const triggerOptions = isMonitorOnly
-    ? sensorTriggers
+    ? [{ value: '', label: 'Select Trigger' }, ...sensorTriggers] // Default for monitor-only
     : [...standardTriggers, ...sensorTriggers];
 
   useEffect(() => {
@@ -92,7 +93,7 @@ function ProgramEditor({ wsRef, isWsReady, programCache, sensors }) {
               setSensorCapability(program.sensorCapability || '');
             }
           } else {
-            setTriggerType('Manual');
+            setTriggerType(''); // Default to empty for invalid/no trigger
             setSensorType('');
             setSensorAddress('');
             setSensorCapability('');
@@ -167,7 +168,12 @@ function ProgramEditor({ wsRef, isWsReady, programCache, sensors }) {
   };
 
   const validateProgram = () => {
-    if (isMonitorOnly) return null;
+    if (!triggerType) {
+      return 'Please select a valid trigger type';
+    }
+    if (isMonitorOnly && triggerType !== 'Sensor') {
+      return 'Monitor-only programs must use a Sensor trigger';
+    }
     if (startDateEnabled && endDateEnabled && startDate && endDate) {
       const start = new Date(startDate);
       const end = new Date(endDate);
@@ -309,7 +315,7 @@ function ProgramEditor({ wsRef, isWsReady, programCache, sensors }) {
         setEndTimeEnabled(content.endTimeEnabled !== false);
         setSelectedDays(content.selectedDays || []);
         setDaysPerWeekEnabled(content.daysPerWeekEnabled !== false);
-        setTriggerType(content.trigger || 'Manual');
+        setTriggerType(content.trigger || '');
         setSensorType(content.sensorType || '');
         setSensorAddress(content.sensorAddress || '');
         setSensorCapability(content.sensorCapability || '');
@@ -394,7 +400,12 @@ function ProgramEditor({ wsRef, isWsReady, programCache, sensors }) {
 
   const handleTriggerChange = (e) => {
     const value = e.target.value;
-    if (value === 'Manual' || value === 'Cycle Timer') {
+    if (value === '') {
+      setTriggerType('');
+      setSensorType('');
+      setSensorAddress('');
+      setSensorCapability('');
+    } else if (value === 'Manual' || value === 'Cycle Timer') {
       setTriggerType(value);
       setSensorType('');
       setSensorAddress('');
@@ -451,13 +462,13 @@ function ProgramEditor({ wsRef, isWsReady, programCache, sensors }) {
               setIsMonitorOnly(e.target.checked);
               if (e.target.checked) {
                 setOutput('null');
-                setTriggerType('Sensor');
+                setTriggerType(sensorTriggers[0]?.value || '');
                 setSensorType(sensorTriggers[0]?.value.split('_')[1] || '');
                 setSensorAddress(sensorTriggers[0]?.value.split('_')[2] || '');
                 setSensorCapability(sensorTriggers[0]?.value.split('_')[3] || '');
               } else {
                 setOutput('A');
-                setTriggerType('Manual');
+                setTriggerType('');
                 setSensorType('');
                 setSensorAddress('');
                 setSensorCapability('');
@@ -473,9 +484,10 @@ function ProgramEditor({ wsRef, isWsReady, programCache, sensors }) {
           id="name"
           type="text"
           value={name}
+          maxLength={25}
           onChange={(e) => setName(e.target.value)}
-          placeholder="Enter program name"
-          className="input-field"
+          placeholder="25 characters max"
+          className="input-field, text-input"
         />
       </div>
       {!isMonitorOnly && (
@@ -628,7 +640,7 @@ function ProgramEditor({ wsRef, isWsReady, programCache, sensors }) {
         <label htmlFor="trigger">Trigger:</label>
         <select
           id="trigger"
-          value={triggerType === 'Manual' || triggerType === 'Cycle Timer' ? triggerType : `Sensor_${sensorType}_${sensorAddress}_${sensorCapability}`}
+          value={triggerType === 'Manual' || triggerType === 'Cycle Timer' ? triggerType : (triggerType === 'Sensor' ? `Sensor_${sensorType}_${sensorAddress}_${sensorCapability}` : '')}
           onChange={handleTriggerChange}
           className="input-field"
         >
@@ -736,6 +748,7 @@ function ProgramEditor({ wsRef, isWsReady, programCache, sensors }) {
         ) : (
           <div className="manual-message">
             {triggerType === 'Manual' && 'Manually powered on'}
+            {triggerType === '' && 'Please select a trigger to configure the program'}
           </div>
         )}
       </div>
@@ -746,6 +759,7 @@ function ProgramEditor({ wsRef, isWsReady, programCache, sensors }) {
         <button className="save-button" onClick={cancelEdit}>
           Cancel
         </button>
+        {error && <div className="error">{error}</div>}
       </div>
     </div>
   );
@@ -758,7 +772,7 @@ ProgramEditor.propTypes = {
   isWsReady: PropTypes.bool.isRequired,
   programCache: PropTypes.arrayOf(
     PropTypes.shape({
-      id: PropTypes.string.isRequired,
+      id: PropTypes.oneOfType([PropTypes.string, PropTypes.number]).isRequired, // Allow string or number for id
       name: PropTypes.string,
       enabled: PropTypes.bool,
       output: PropTypes.string,

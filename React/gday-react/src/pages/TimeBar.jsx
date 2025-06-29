@@ -293,8 +293,8 @@ function TimeBar({ message, wsRef }) {
                 value={deviceName}
                 onChange={handleDeviceNameChange}
                 maxLength={25}
-                placeholder="Device name -25 chars max"
-                className="device-name-input"
+                placeholder="25 characters max"
+                className="text-input"
               />
             </label>
             {offsetError && <p className="overlay-error">{offsetError}</p>}

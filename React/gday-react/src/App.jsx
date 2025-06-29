@@ -26,6 +26,14 @@ function App() {
       console.warn('WebSocket not connected, cannot request network info');
     }
   }, []);
+  const refreshSensors = useCallback(() => {
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({ command: 'refresh-sensors' }));
+    } else {
+      console.warn('WebSocket not connected, cannot request network info');
+    }
+  }, []);
+  
 
   useEffect(() => {
     const fetchConfig = async () => {
@@ -164,7 +172,7 @@ function App() {
       <Routes>
         <Route path="/" element={<Home message={message} wsRef={wsRef} isWsReady={isWsReady} activeProgramData={activeProgramData} programCache={programCache} />} />
         <Route path="/graph" element={<Graph />} />
-        <Route path="/settings" element={<Settings requestNetworkInfo={requestNetworkInfo} networkInfo={networkInfo} connectionStatus={connectionStatus} sensors={sensors} />} />
+        <Route path="/settings" element={<Settings requestNetworkInfo={requestNetworkInfo} refreshSensors={refreshSensors} networkInfo={networkInfo} connectionStatus={connectionStatus} sensors={sensors} />} />
         <Route path="/programs" element={<Programs wsRef={wsRef} isWsReady={isWsReady} programCache={programCache}/>} />
         <Route path="/programEditor" element={<ProgramEditor wsRef={wsRef} isWsReady={isWsReady} sensors={sensors} programCache={programCache}/>} />
       </Routes>
