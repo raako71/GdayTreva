@@ -6,19 +6,19 @@ import PropTypes from 'prop-types';
 function ProgramEditor({ wsRef, isWsReady, programCache, sensors }) {
   const [programID, setProgramID] = useState('00');
   const [name, setName] = useState('');
-  const [enabled, setEnabled] = useState(false);
+  const [enabled, setEnabled] = useState(true);
   const [isMonitorOnly, setIsMonitorOnly] = useState(false);
   const [output, setOutput] = useState('A');
   const [startDate, setStartDate] = useState('');
-  const [startDateEnabled, setStartDateEnabled] = useState(true);
+  const [startDateEnabled, setStartDateEnabled] = useState(false);
   const [endDate, setEndDate] = useState('');
-  const [endDateEnabled, setEndDateEnabled] = useState(true);
+  const [endDateEnabled, setEndDateEnabled] = useState(false);
   const [startTime, setStartTime] = useState('00:00');
-  const [startTimeEnabled, setStartTimeEnabled] = useState(true);
+  const [startTimeEnabled, setStartTimeEnabled] = useState(false);
   const [endTime, setEndTime] = useState('23:59');
-  const [endTimeEnabled, setEndTimeEnabled] = useState(true);
+  const [endTimeEnabled, setEndTimeEnabled] = useState(false);
   const [selectedDays, setSelectedDays] = useState([]);
-  const [daysPerWeekEnabled, setDaysPerWeekEnabled] = useState(true);
+  const [daysPerWeekEnabled, setDaysPerWeekEnabled] = useState(false);
   const [triggerType, setTriggerType] = useState(''); // Default to empty for new programs
   const [sensorType, setSensorType] = useState('');
   const [sensorAddress, setSensorAddress] = useState('');

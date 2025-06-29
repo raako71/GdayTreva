@@ -101,7 +101,7 @@ function Settings({ requestNetworkInfo, networkInfo, connectionStatus, sensors, 
             </ul>
           ) : (
             <div>No sensors detected</div>
-          )}
+          )}<div className='center'>
           <button
           className="save-button"
             onClick={() => {
@@ -111,6 +111,7 @@ function Settings({ requestNetworkInfo, networkInfo, connectionStatus, sensors, 
           >
             Rescan for sensors
           </button>
+          </div>
         </div>
       </div>
     </div>
