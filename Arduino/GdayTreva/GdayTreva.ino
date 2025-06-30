@@ -72,6 +72,8 @@ unsigned long lastACSPoll = 0;
 const unsigned long cacheUpdateInterval = 1000;
 const unsigned long acsPollInterval = 100;
 
+time_t NextCycleToggleA = 0, NextCycleToggleB = 0;
+
 struct Config {
   char ssid[32];
   char password[64];
@@ -84,13 +86,11 @@ struct Config {
 Config config;
 
 struct CycleConfig {
-  int runSeconds = 0;
-  int stopSeconds = 0;
+  unsigned int runSeconds = 0;
+  unsigned int stopSeconds = 0;
   bool startHigh = false;
   bool valid = false;
 };
-CycleConfig cycleConfigA, cycleConfigB;
-
 
 std::vector<int> null_program_ids;
 
@@ -145,7 +145,7 @@ struct PriorityResult {
   time_t nextTransition;
 };
 
-// Program scheduling structs
+
 struct ProgramDetails {
   String name;
   int id;
@@ -325,10 +325,10 @@ void i2cScanTask(void *parameter) {
 }
 
 static unsigned long lastSensorRequest = 0;
-void requestSensorScan(){
+void requestSensorScan() {
   if (millis() - lastSensorRequest > 5000) {
-  scanI2CSensors();
-  lastSensorRequest = millis();
+    scanI2CSensors();
+    lastSensorRequest = millis();
   }
 }
 
@@ -1265,7 +1265,7 @@ void handleSaveProgram(AsyncWebSocketClient *client, const JsonDocument &doc) {
 
     if (serializeJson(contentDoc, file) == 0) {
       file.close();
-      xSemaphoreGive(littlefsMutex);  
+      xSemaphoreGive(littlefsMutex);
       sendProgramResponse(client, false, "Failed to write program", targetID.c_str());
       return;
     }
@@ -1558,36 +1558,99 @@ time_t getAdjustedTime() {
   time_t now = time(nullptr);
   return now + (config.time_offset_minutes * 60);
 }
+/*
+struct CycleConfig {
+  int runSeconds = 0;
+  int stopSeconds = 0;
+  bool startHigh = false;
+  bool valid = false;
+};
+CycleConfig cycleConfigA, cycleConfigB;
 
-std::pair<bool, bool> runCycleTimer(const char *output, CycleState &state, const CycleConfig &config) {
+details.cycleConfig.runSeconds = (doc["runTime"]["hours"].as<int>() * 3600) + (doc["runTime"]["minutes"].as<int>() * 60) + doc["runTime"]["seconds"].as<int>();
+        details.cycleConfig.stopSeconds = (doc["stopTime"]["hours"].as<int>() * 3600) + (doc["stopTime"]["minutes"].as<int>() * 60) + doc["stopTime"]["seconds"].as<int>();
+        details.cycleConfig.startHigh = doc["startHigh"].as<bool>();
+        details.cycleConfig.valid = (details.cycleConfig.runSeconds > 0 && details.cycleConfig.stopSeconds > 0);
+*/
 
-  if (!config.valid || config.runSeconds == 0 || config.stopSeconds == 0) {
-    DEBUG_PRINT(3, "runCycleTimer: Output=%s, INVALID config (valid=%d, runSeconds=%d, stopSeconds=%d)\n", output, config.valid, config.runSeconds, config.stopSeconds);
-    return { false, 0 };
-  } else {
-    DEBUG_PRINT(2, "runCycleTimer: Output=%s, Valid config (valid=%d, runSeconds=%d, stopSeconds=%d)\n", output, config.valid, config.runSeconds, config.stopSeconds);
+bool runCycleTimer(const char *output, bool active, const ProgramDetails &prog, time_t localEpoch) {
+  static bool cycleARunning = false;
+  static bool cycleAoutput = false;
+  static bool cycleBRunning = false;
+  static bool cycleBoutput = false;
+  String outStr = output;
+  if (outStr == "A") {
+    if (active) {
+      if (cycleARunning) {
+        if(NextCycleToggleA <= localEpoch){
+          if(cycleAoutput){
+            cycleAoutput = false;
+            NextCycleToggleA = localEpoch + prog.cycleConfig.stopSeconds;
+          }else {
+            cycleAoutput = true;
+            NextCycleToggleA = localEpoch + prog.cycleConfig.runSeconds;
+          }
+        }
+      } else {
+        if (prog.cycleConfig.valid) {
+          if (prog.cycleConfig.startHigh) {
+            cycleAoutput = true;
+            NextCycleToggleA = localEpoch + prog.cycleConfig.runSeconds;
+          } else {
+            cycleAoutput = false;
+            NextCycleToggleA = localEpoch + prog.cycleConfig.stopSeconds;
+          }
+          cycleARunning = true;
+        } else {
+          cycleAoutput = false;
+          cycleARunning = false;
+          DEBUG_PRINT(2, "ERROR: CycleTimerA invalid");
+        }
+      }
+    } else {
+      cycleAoutput = false;
+      cycleARunning = false;
+      NextCycleToggleA = 0;
+    }
+    return cycleAoutput;
+  } else
+  if (outStr == "B") {
+    if (active) {
+      if (cycleBRunning) {
+        if(NextCycleToggleB <= localEpoch){
+          if(cycleBoutput){
+            cycleBoutput = false;
+            NextCycleToggleB = localEpoch + prog.cycleConfig.stopSeconds;
+          }else {
+            cycleBoutput = true;
+            NextCycleToggleB = localEpoch + prog.cycleConfig.runSeconds;
+          }
+        }
+      } else {
+        if (prog.cycleConfig.valid) {
+          if (prog.cycleConfig.startHigh) {
+            cycleBoutput = true;
+            NextCycleToggleB = localEpoch + prog.cycleConfig.runSeconds;
+          } else {
+            cycleBoutput = false;
+            NextCycleToggleB = localEpoch + prog.cycleConfig.stopSeconds;
+          }
+          cycleBRunning = true;
+        } else {
+          cycleBoutput = false;
+          cycleBRunning = false;
+          DEBUG_PRINT(2, "ERROR: CycleTimerB invalid");
+        }
+      }
+    } else {
+      cycleBoutput = false;
+      cycleBRunning = false;
+      NextCycleToggleB = 0;
+    }
+    return cycleBoutput;
   }
-  time_t next_toggle = 0;
-  unsigned long currentMillis = millis();
-  time_t currentEpoch = time(nullptr);
-  if (!state.isRunning) {
-    state.isRunning = true;
-    state.lastSwitchTime = currentMillis;
-    state.isOnPhase = config.startHigh;
-    state.nextToggle = currentEpoch + (config.startHigh ? config.runSeconds : config.stopSeconds);
-    return { state.isOnPhase, state.nextToggle };
-  }
-  unsigned long elapsedMillis = currentMillis - state.lastSwitchTime;
-  unsigned long cycleDurationMillis = (state.isOnPhase ? config.runSeconds : config.stopSeconds) * 1000;
-  if (elapsedMillis >= cycleDurationMillis) {
-    state.isOnPhase = !state.isOnPhase;
-    state.lastSwitchTime = currentMillis;
-    state.nextToggle = currentEpoch + (state.isOnPhase ? config.runSeconds : config.stopSeconds);
-    return { state.isOnPhase, state.nextToggle };
-  }
-  unsigned long remainingMillis = cycleDurationMillis - elapsedMillis;
-  state.nextToggle = currentEpoch + (remainingMillis + 999) / 1000;
-  return { state.isOnPhase, state.nextToggle };
+  DEBUG_PRINT(2, "ERROR: CycleTimer invalid");
+  return 0;
 }
 
 //determine active status and next transition for a program.
@@ -1733,6 +1796,14 @@ void setProgramPriorities(time_t now) {
       }
     }
   }
+  if (activeProgramA == -1) {
+    outputAState = false;
+    digitalWrite(OUTPUT_A_PIN, LOW)
+  }
+  if (activeProgramB == -1) {
+    outputBState = false;
+    digitalWrite(OUTPUT_B_PIN, LOW)
+  }
 
   DEBUG_PRINT(1, "Programs set: activeProgramA=%d, activeProgramB=%d, nextTransA=%ld, nextTransB=%ld\n",
               activeProgramA, activeProgramB, nextTransA, nextTransB);
@@ -1745,7 +1816,7 @@ void updateProgramCache() {
   ProgramCache.clear();
   null_program_ids.clear();
 
-  time_t now = getAdjustedTime();
+  time_t localEpoch = getAdjustedTime();
 
   for (int i = 1; i <= numPrograms; i++) {
     String filename = "/program" + String(i < 10 ? "0" + String(i) : String(i)) + ".json";
@@ -1816,7 +1887,7 @@ void updateProgramCache() {
     }
   }
   DEBUG_PRINTLN(1, "Program cache updated.");
-  setProgramPriorities(now);
+  setProgramPriorities(localEpoch);
   sendProgramCache();
 }
 
@@ -1880,7 +1951,45 @@ void sendProgramCache() {
   Serial.println("Sent ProgramCache data");
 }
 
-void updateOutputs() {
+void updateOutputs(time_t localEpoch) {
+  outputAState = false;
+  outputBState = false;
+  static bool timerA = false;
+  static bool timerB = false;
+  if (activeProgramA > 0) {
+    for (const auto &prog : ProgramCache) {
+      if (prog.id == activeProgramA) {
+        if (prog.trigger == "Cycle Timer") {
+          timerA = true;
+          outputAState = runCycleTimer("A", true, prog, localEpoch);
+        } else {
+          if (timerA) {
+            runCycleTimer("A", false, prog, localEpoch);
+            timerA = false;
+          }
+        }
+      }
+    }
+    
+  } else outputAState = 0;
+  if (activeProgramB > 0) {
+    for (const auto &prog : ProgramCache) {
+      if (prog.id == activeProgramB) {
+        if (prog.trigger == "Cycle Timer") {
+          timerB = true;
+          outputBState = runCycleTimer("B", true, prog, localEpoch);
+        } else {
+          if (timerB) {
+            runCycleTimer("B", false, prog, localEpoch);
+            timerB = false;
+          }
+        }
+      }
+    }
+    
+  } else outputBState = 0;
+  digitalWrite(OUTPUT_A_PIN, outputAState);
+  digitalWrite(OUTPUT_B_PIN, outputBState);
 }
 
 void printStatus() {
@@ -2080,11 +2189,22 @@ void loop() {
   }
   static unsigned long lastTimeSend = 0;
   static unsigned long lastOutputUpdate = 0;
-  if (millis() - lastOutputUpdate > 100) {
+  if (millis() - lastOutputUpdate >= 100) {
+    if (timeSynced) {
+      time_t localEpoch = getAdjustedTime();
+      if (nextTransA != -1 && localEpoch >= nextTransA) {
+        DEBUG_PRINTLN(1, "nextTransA has passed, updating priorities");
+        setProgramPriorities(localEpoch);
+      }
+      if (nextTransB != -1 && localEpoch >= nextTransB) {
+        DEBUG_PRINTLN(1, "nextTransB has passed, updating priorities");
+        setProgramPriorities(localEpoch);
+      }
+      updateOutputs(localEpoch);
+    }
     pollSensors();
-    updateOutputs();
     lastOutputUpdate = millis();
-    if (millis() - lastTimeSend > 999) {
+    if (millis() - lastTimeSend >= 1000) {
       sendTimeToClients();
       lastTimeSend = millis();
     }
