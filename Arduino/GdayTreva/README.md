@@ -49,3 +49,4 @@
  - 0.3.6: Device Name. 28 Jun 25
  - 0.3.7: Refresh-sensors. 29 Jun 25
  - 0.4: Cycle timer running.
+ - 0.4.1: Send Cycle Timer info.

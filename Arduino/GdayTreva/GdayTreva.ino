@@ -1058,7 +1058,7 @@ void onWsEvent(AsyncWebSocket *server, AsyncWebSocketClient *client, AwsEventTyp
           } else if (command && strcmp(command, "unsubscribe_output_status") == 0) {
             subscriber_epochs.erase(client);
             DEBUG_PRINT(1, "Client #%u unsubscribed from status\n", client->id());
-          } else if (command && strcmp(command, "get_output_status") == 0){
+          } else if (command && strcmp(command, "get_output_status") == 0) {
             sendActiveprograms();
           } else if (command && strcmp(command, "get_discovered_sensors") == 0) {
             sendDiscoveredSensors();
@@ -1559,6 +1559,51 @@ time_t getAdjustedTime() {
   return now + (config.time_offset_minutes * 60);
 }
 
+void sendCycleTimerInfo() {
+  static time_t lastNextCycleToggleA = 0;
+  static time_t lastNextCycleToggleB = 0;
+
+  // Only send if toggle times have changed
+  if (NextCycleToggleA == lastNextCycleToggleA && NextCycleToggleB == lastNextCycleToggleB) {
+    return;  // No change, skip sending
+  }
+
+  if (subscriber_epochs.empty()) {
+    // Update stored values even if no subscribers to avoid sending stale data later
+    lastNextCycleToggleA = NextCycleToggleA;
+    lastNextCycleToggleB = NextCycleToggleB;
+    return;
+  }
+  uint32_t new_epoch = millis();
+  DynamicJsonDocument doc(256);  // Estimated size for small JSON
+  doc["type"] = "cycle_timer_status";
+  doc["epoch"] = new_epoch;
+  doc["NextCycleToggleA"] = NextCycleToggleA;
+  doc["NextCycleToggleB"] = NextCycleToggleB;
+
+  char buffer[256];
+  size_t len = serializeJson(doc, buffer, sizeof(buffer));
+  if (len == 0) {
+    Serial.println("sendCycleTimerInfo: JSON serialization failed");
+    xSemaphoreGive(sensorMutex);
+    return;
+  }
+
+  for (auto &pair : subscriber_epochs) {
+    if (new_epoch > pair.second) {
+      pair.first->text(buffer);
+      pair.second = new_epoch;
+      DEBUG_PRINT(2, "Sent cycle_timer_status to client #%u\n", pair.first->id());
+    }
+  }
+  DEBUG_PRINT(1, "Sent cycle timer status: NextCycleToggleA=%ld, NextCycleToggleB=%ld\n",
+              NextCycleToggleA, NextCycleToggleB);
+
+  // Update last sent values
+  lastNextCycleToggleA = NextCycleToggleA;
+  lastNextCycleToggleB = NextCycleToggleB;
+}
+
 bool runCycleTimer(const char *output, bool active, const ProgramDetails &prog, time_t localEpoch) {
   static bool cycleARunning = false;
   static bool cycleAoutput = false;
@@ -1577,6 +1622,7 @@ bool runCycleTimer(const char *output, bool active, const ProgramDetails &prog, 
       cycleBRunning = false;
       NextCycleToggleB = 0;
     }
+    sendCycleTimerInfo();  // Notify clients if toggle times changed
     return false;
   }
 
@@ -1587,12 +1633,10 @@ bool runCycleTimer(const char *output, bool active, const ProgramDetails &prog, 
         cycleAoutput = prog.cycleConfig.startHigh;
         cycleARunning = true;
         NextCycleToggleA = localEpoch + (cycleAoutput ? prog.cycleConfig.runSeconds : prog.cycleConfig.stopSeconds);
-        DEBUG_PRINT(2, "Cycle timer %s started\n", output);
       } else if (localEpoch >= NextCycleToggleA) {
         // Toggle state
         cycleAoutput = !cycleAoutput;
         NextCycleToggleA = localEpoch + (cycleAoutput ? prog.cycleConfig.runSeconds : prog.cycleConfig.stopSeconds);
-        DEBUG_PRINT(2, "Cycle timer %s toggled\n", output);
       }
     } else {
       // Stop cycle
@@ -1600,6 +1644,7 @@ bool runCycleTimer(const char *output, bool active, const ProgramDetails &prog, 
       cycleARunning = false;
       NextCycleToggleA = 0;
     }
+    sendCycleTimerInfo();  // Notify clients if toggle times changed
     return cycleAoutput;
   } else if (strcmp(output, "B") == 0) {
     if (active) {
@@ -1608,12 +1653,10 @@ bool runCycleTimer(const char *output, bool active, const ProgramDetails &prog, 
         cycleBoutput = prog.cycleConfig.startHigh;
         cycleBRunning = true;
         NextCycleToggleB = localEpoch + (cycleBoutput ? prog.cycleConfig.runSeconds : prog.cycleConfig.stopSeconds);
-        DEBUG_PRINT(2, "Cycle timer %s started\n", output);
       } else if (localEpoch >= NextCycleToggleB) {
         // Toggle state
         cycleBoutput = !cycleBoutput;
         NextCycleToggleB = localEpoch + (cycleBoutput ? prog.cycleConfig.runSeconds : prog.cycleConfig.stopSeconds);
-        DEBUG_PRINT(2, "Cycle timer %s toggled\n", output);
       }
     } else {
       // Stop cycle
@@ -1621,10 +1664,12 @@ bool runCycleTimer(const char *output, bool active, const ProgramDetails &prog, 
       cycleBRunning = false;
       NextCycleToggleB = 0;
     }
+    sendCycleTimerInfo();  // Notify clients if toggle times changed
     return cycleBoutput;
   }
 
   DEBUG_PRINT(2, "ERROR: Invalid output %s\n", output);
+  sendCycleTimerInfo();  // Notify clients if toggle times changed
   return false;
 }
 
