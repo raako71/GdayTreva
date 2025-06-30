@@ -1058,7 +1058,7 @@ void onWsEvent(AsyncWebSocket *server, AsyncWebSocketClient *client, AwsEventTyp
           } else if (command && strcmp(command, "unsubscribe_output_status") == 0) {
             subscriber_epochs.erase(client);
             DEBUG_PRINT(1, "Client #%u unsubscribed from status\n", client->id());
-          } else if (command && strcmp(command, "get_output_status") == 0 || strcmp(command, "get_trigger_status") == 0) {
+          } else if (command && strcmp(command, "get_output_status") == 0){
             sendActiveprograms();
           } else if (command && strcmp(command, "get_discovered_sensors") == 0) {
             sendDiscoveredSensors();
@@ -1558,99 +1558,74 @@ time_t getAdjustedTime() {
   time_t now = time(nullptr);
   return now + (config.time_offset_minutes * 60);
 }
-/*
-struct CycleConfig {
-  int runSeconds = 0;
-  int stopSeconds = 0;
-  bool startHigh = false;
-  bool valid = false;
-};
-CycleConfig cycleConfigA, cycleConfigB;
-
-details.cycleConfig.runSeconds = (doc["runTime"]["hours"].as<int>() * 3600) + (doc["runTime"]["minutes"].as<int>() * 60) + doc["runTime"]["seconds"].as<int>();
-        details.cycleConfig.stopSeconds = (doc["stopTime"]["hours"].as<int>() * 3600) + (doc["stopTime"]["minutes"].as<int>() * 60) + doc["stopTime"]["seconds"].as<int>();
-        details.cycleConfig.startHigh = doc["startHigh"].as<bool>();
-        details.cycleConfig.valid = (details.cycleConfig.runSeconds > 0 && details.cycleConfig.stopSeconds > 0);
-*/
 
 bool runCycleTimer(const char *output, bool active, const ProgramDetails &prog, time_t localEpoch) {
   static bool cycleARunning = false;
   static bool cycleAoutput = false;
   static bool cycleBRunning = false;
   static bool cycleBoutput = false;
-  String outStr = output;
-  if (outStr == "A") {
+
+  // Early validation check
+  if (active && !prog.cycleConfig.valid) {
+    DEBUG_PRINT(2, "ERROR: CycleTimer for %s invalid\n", output);
+    if (strcmp(output, "A") == 0) {
+      cycleAoutput = false;
+      cycleARunning = false;
+      NextCycleToggleA = 0;
+    } else if (strcmp(output, "B") == 0) {
+      cycleBoutput = false;
+      cycleBRunning = false;
+      NextCycleToggleB = 0;
+    }
+    return false;
+  }
+
+  if (strcmp(output, "A") == 0) {
     if (active) {
-      if (cycleARunning) {
-        if(NextCycleToggleA <= localEpoch){
-          if(cycleAoutput){
-            cycleAoutput = false;
-            NextCycleToggleA = localEpoch + prog.cycleConfig.stopSeconds;
-          }else {
-            cycleAoutput = true;
-            NextCycleToggleA = localEpoch + prog.cycleConfig.runSeconds;
-          }
-        }
-      } else {
-        if (prog.cycleConfig.valid) {
-          if (prog.cycleConfig.startHigh) {
-            cycleAoutput = true;
-            NextCycleToggleA = localEpoch + prog.cycleConfig.runSeconds;
-          } else {
-            cycleAoutput = false;
-            NextCycleToggleA = localEpoch + prog.cycleConfig.stopSeconds;
-          }
-          cycleARunning = true;
-        } else {
-          cycleAoutput = false;
-          cycleARunning = false;
-          DEBUG_PRINT(2, "ERROR: CycleTimerA invalid");
-        }
+      if (!cycleARunning) {
+        // Initialize cycle
+        cycleAoutput = prog.cycleConfig.startHigh;
+        cycleARunning = true;
+        NextCycleToggleA = localEpoch + (cycleAoutput ? prog.cycleConfig.runSeconds : prog.cycleConfig.stopSeconds);
+        DEBUG_PRINT(2, "Cycle timer %s started\n", output);
+      } else if (localEpoch >= NextCycleToggleA) {
+        // Toggle state
+        cycleAoutput = !cycleAoutput;
+        NextCycleToggleA = localEpoch + (cycleAoutput ? prog.cycleConfig.runSeconds : prog.cycleConfig.stopSeconds);
+        DEBUG_PRINT(2, "Cycle timer %s toggled\n", output);
       }
     } else {
+      // Stop cycle
       cycleAoutput = false;
       cycleARunning = false;
       NextCycleToggleA = 0;
     }
     return cycleAoutput;
-  } else
-  if (outStr == "B") {
+  } else if (strcmp(output, "B") == 0) {
     if (active) {
-      if (cycleBRunning) {
-        if(NextCycleToggleB <= localEpoch){
-          if(cycleBoutput){
-            cycleBoutput = false;
-            NextCycleToggleB = localEpoch + prog.cycleConfig.stopSeconds;
-          }else {
-            cycleBoutput = true;
-            NextCycleToggleB = localEpoch + prog.cycleConfig.runSeconds;
-          }
-        }
-      } else {
-        if (prog.cycleConfig.valid) {
-          if (prog.cycleConfig.startHigh) {
-            cycleBoutput = true;
-            NextCycleToggleB = localEpoch + prog.cycleConfig.runSeconds;
-          } else {
-            cycleBoutput = false;
-            NextCycleToggleB = localEpoch + prog.cycleConfig.stopSeconds;
-          }
-          cycleBRunning = true;
-        } else {
-          cycleBoutput = false;
-          cycleBRunning = false;
-          DEBUG_PRINT(2, "ERROR: CycleTimerB invalid");
-        }
+      if (!cycleBRunning) {
+        // Initialize cycle
+        cycleBoutput = prog.cycleConfig.startHigh;
+        cycleBRunning = true;
+        NextCycleToggleB = localEpoch + (cycleBoutput ? prog.cycleConfig.runSeconds : prog.cycleConfig.stopSeconds);
+        DEBUG_PRINT(2, "Cycle timer %s started\n", output);
+      } else if (localEpoch >= NextCycleToggleB) {
+        // Toggle state
+        cycleBoutput = !cycleBoutput;
+        NextCycleToggleB = localEpoch + (cycleBoutput ? prog.cycleConfig.runSeconds : prog.cycleConfig.stopSeconds);
+        DEBUG_PRINT(2, "Cycle timer %s toggled\n", output);
       }
     } else {
+      // Stop cycle
       cycleBoutput = false;
       cycleBRunning = false;
       NextCycleToggleB = 0;
     }
     return cycleBoutput;
   }
-  DEBUG_PRINT(2, "ERROR: CycleTimer invalid");
-  return 0;
+
+  DEBUG_PRINT(2, "ERROR: Invalid output %s\n", output);
+  return false;
 }
 
 //determine active status and next transition for a program.
@@ -1798,11 +1773,11 @@ void setProgramPriorities(time_t now) {
   }
   if (activeProgramA == -1) {
     outputAState = false;
-    digitalWrite(OUTPUT_A_PIN, LOW)
+    digitalWrite(OUTPUT_A_PIN, LOW);
   }
   if (activeProgramB == -1) {
     outputBState = false;
-    digitalWrite(OUTPUT_B_PIN, LOW)
+    digitalWrite(OUTPUT_B_PIN, LOW);
   }
 
   DEBUG_PRINT(1, "Programs set: activeProgramA=%d, activeProgramB=%d, nextTransA=%ld, nextTransB=%ld\n",
@@ -1954,42 +1929,47 @@ void sendProgramCache() {
 void updateOutputs(time_t localEpoch) {
   outputAState = false;
   outputBState = false;
-  static bool timerA = false;
-  static bool timerB = false;
+
   if (activeProgramA > 0) {
     for (const auto &prog : ProgramCache) {
       if (prog.id == activeProgramA) {
         if (prog.trigger == "Cycle Timer") {
-          timerA = true;
           outputAState = runCycleTimer("A", true, prog, localEpoch);
+        } else if (prog.trigger == "Always On") {
+          outputAState = true;
+          runCycleTimer("A", false, prog, localEpoch);  // Stop any running cycle
         } else {
-          if (timerA) {
-            runCycleTimer("A", false, prog, localEpoch);
-            timerA = false;
-          }
+          runCycleTimer("A", false, prog, localEpoch);  // Stop any running cycle
+          // Add sensor-based logic if needed
         }
+        break;  // Found the program, no need to continue
       }
     }
-    
-  } else outputAState = 0;
+  } else {
+    runCycleTimer("A", false, ProgramDetails{}, localEpoch);  // Stop cycle with default struct
+  }
+
   if (activeProgramB > 0) {
     for (const auto &prog : ProgramCache) {
       if (prog.id == activeProgramB) {
         if (prog.trigger == "Cycle Timer") {
-          timerB = true;
           outputBState = runCycleTimer("B", true, prog, localEpoch);
+        } else if (prog.trigger == "Always On") {
+          outputBState = true;
+          runCycleTimer("B", false, prog, localEpoch);  // Stop any running cycle
         } else {
-          if (timerB) {
-            runCycleTimer("B", false, prog, localEpoch);
-            timerB = false;
-          }
+          runCycleTimer("B", false, prog, localEpoch);  // Stop any running cycle
+          // Add sensor-based logic if needed
         }
+        break;
       }
     }
-    
-  } else outputBState = 0;
-  digitalWrite(OUTPUT_A_PIN, outputAState);
-  digitalWrite(OUTPUT_B_PIN, outputBState);
+  } else {
+    runCycleTimer("B", false, ProgramDetails{}, localEpoch);  // Stop cycle with default struct
+  }
+
+  digitalWrite(OUTPUT_A_PIN, outputAState ? HIGH : LOW);
+  digitalWrite(OUTPUT_B_PIN, outputBState ? HIGH : LOW);
 }
 
 void printStatus() {
