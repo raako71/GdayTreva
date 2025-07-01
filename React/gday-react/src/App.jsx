@@ -126,6 +126,8 @@ function App() {
                 setCycleTimerStatus({
                   NextCycleToggleA: data.NextCycleToggleA || 0,
                   NextCycleToggleB: data.NextCycleToggleB || 0,
+                  outputAState: data.outputAState !== undefined ? data.outputAState : false,
+                  outputBState: data.outputBState !== undefined ? data.outputBState : false,
                 });
                 break;
               default:

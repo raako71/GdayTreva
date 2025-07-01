@@ -16,17 +16,11 @@ const formatCountdown = (secondsLeft) => {
 
 function Home({ activeProgramData, programCache, message, cycleTimerStatus }) {
   const [countdowns, setCountdowns] = useState({});
-  const triggerStatusRef = useRef(activeProgramData);
   const messageRef = useRef(message);
   const cycleTimerStatusRef = useRef(cycleTimerStatus);
 
-  useEffect(() => {
-  console.log('activeProgramData:', activeProgramData);
-}, [activeProgramData]);
-
   // Update refs with latest props
   useEffect(() => {
-    triggerStatusRef.current = activeProgramData;
     messageRef.current = message;
     cycleTimerStatusRef.current = cycleTimerStatus;
   }, [activeProgramData, message, cycleTimerStatus]);
@@ -34,7 +28,6 @@ function Home({ activeProgramData, programCache, message, cycleTimerStatus }) {
   // Update countdowns every second for cycle timer programs
   useEffect(() => {
     const interval = setInterval(() => {
-      const currentTriggerStatus = triggerStatusRef.current;
       const currentMessage = messageRef.current;
       const currentCycleTimerStatus = cycleTimerStatusRef.current;
 
@@ -101,9 +94,13 @@ function Home({ activeProgramData, programCache, message, cycleTimerStatus }) {
           ? `Capability: ${prog.sensorCapability}`
           : prog.trigger || 'Unknown';
 
-        // Determine state from activeProgramData
-        const activeProg = activeProgramData?.progs?.find((p) => p.id === prog.id);
-        const state = activeProg && activeProg.state !== undefined ? (activeProg.state ? 'ON' : 'OFF') : null;
+        // Determine state from cycleTimerStatus
+        let state = null;
+        if (prog.output === 'A' && cycleTimerStatus.outputAState !== undefined) {
+          state = cycleTimerStatus.outputAState ? 'ON' : 'OFF';
+        } else if (prog.output === 'B' && cycleTimerStatus.outputBState !== undefined) {
+          state = cycleTimerStatus.outputBState ? 'ON' : 'OFF';
+        }
 
         // Find sensor value for sensor-triggered programs
         let sensorValue = 'N/A';
@@ -139,7 +136,7 @@ function Home({ activeProgramData, programCache, message, cycleTimerStatus }) {
           </div>
         );
       });
-  }, [programCache, activeProgramData, countdowns]);
+  }, [programCache, activeProgramData, cycleTimerStatus, countdowns]);
 
   return (
     <div>
@@ -203,6 +200,8 @@ Home.propTypes = {
   cycleTimerStatus: PropTypes.shape({
     NextCycleToggleA: PropTypes.number,
     NextCycleToggleB: PropTypes.number,
+    outputAState: PropTypes.bool,
+    outputBState: PropTypes.bool,
   }),
 };
 
@@ -210,7 +209,7 @@ Home.defaultProps = {
   activeProgramData: { progs: [], sensors: [] },
   programCache: [],
   message: { epoch: 0, device_name: '' },
-  cycleTimerStatus: { NextCycleToggleA: 0, NextCycleToggleB: 0 },
+  cycleTimerStatus: { NextCycleToggleA: 0, NextCycleToggleB: 0, outputAState: false, outputBState: false },
 };
 
 export default Home;
