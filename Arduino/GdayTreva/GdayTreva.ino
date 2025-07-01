@@ -23,15 +23,17 @@
 
 #define DEBUG_PRINT(level, ...) \
   do { \
-    if (debugLevel >= level) Serial.printf(__VA_ARGS__); \
+    if (debugLevel >= level && Serial) Serial.printf(__VA_ARGS__); \
   } while (0)
 #define DEBUG_PRINTLN(level, ...) \
   do { \
-    if (debugLevel >= level) { \
+    if (debugLevel >= level && Serial) { \
       Serial.printf(__VA_ARGS__); \
       Serial.println(); \
     } \
   } while (0)
+
+int debugLevel = 0;
 
 SemaphoreHandle_t littlefsMutex = NULL;
 
@@ -109,8 +111,6 @@ unsigned long totalHeap = 0;
 int numPrograms = 10;
 bool programsChanged = true;
 bool outputAState = false, outputBState = false;
-
-int debugLevel = 1;
 
 std::map<AsyncWebSocketClient *, uint32_t> subscriber_epochs;
 uint32_t last_output_epoch = 0;

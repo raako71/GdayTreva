@@ -52,3 +52,4 @@
  - 0.4.1: Send Cycle Timer info.
  - 0.4.2: Standard Program IDs, cycle timer info.
  - 0.4.3: Absolute epoch for cycletimer, send state with cycle timer info.
+ - 0.4.4: Default no serial.
