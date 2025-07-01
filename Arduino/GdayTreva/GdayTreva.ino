@@ -115,18 +115,6 @@ int debugLevel = 1;
 std::map<AsyncWebSocketClient *, uint32_t> subscriber_epochs;
 uint32_t last_output_epoch = 0;
 
-struct TriggerInfo {
-  int id;
-  String output;
-  String trigger;
-  time_t next_toggle;
-  String sensor_value;
-  bool state;
-  bool operator==(const TriggerInfo &other) const {
-    return id == other.id && output == other.output && trigger == other.trigger && next_toggle == other.next_toggle && sensor_value == other.sensor_value && state == other.state;
-  }
-};
-
 bool sensorsChanged = false;
 
 struct PriorityResult {
@@ -1036,12 +1024,13 @@ void sendCycleTimerInfo(bool newClient = false) {
   doc["epoch"] = new_epoch;
   doc["NextCycleToggleA"] = NextCycleToggleA;
   doc["NextCycleToggleB"] = NextCycleToggleB;
+  doc["outputAState"] = outputAState;
+  doc["outputBState"] = outputBState;
 
   char buffer[256];
   size_t len = serializeJson(doc, buffer, sizeof(buffer));
   if (len == 0) {
     Serial.println("sendCycleTimerInfo: JSON serialization failed");
-    xSemaphoreGive(sensorMutex);  // Note: This may be incorrect; see below
     return;
   }
 
@@ -1603,11 +1592,12 @@ time_t getAdjustedTime() {
   return now + (config.time_offset_minutes * 60);
 }
 
-bool runCycleTimer(const char *output, bool active, const ProgramDetails &prog, time_t localEpoch) {
+bool runCycleTimer(const char *output, bool active, const ProgramDetails &prog) {
   static bool cycleARunning = false;
   static bool cycleAoutput = false;
   static bool cycleBRunning = false;
   static bool cycleBoutput = false;
+   time_t now = time(nullptr);
 
   // Early validation check
   if (active && !prog.cycleConfig.valid) {
@@ -1631,11 +1621,11 @@ bool runCycleTimer(const char *output, bool active, const ProgramDetails &prog, 
         // Initialize cycle
         cycleAoutput = prog.cycleConfig.startHigh;
         cycleARunning = true;
-        NextCycleToggleA = localEpoch + (cycleAoutput ? prog.cycleConfig.runSeconds : prog.cycleConfig.stopSeconds);
-      } else if (localEpoch >= NextCycleToggleA) {
+        NextCycleToggleA = now + (cycleAoutput ? prog.cycleConfig.runSeconds : prog.cycleConfig.stopSeconds);
+      } else if (now >= NextCycleToggleA) {
         // Toggle state
         cycleAoutput = !cycleAoutput;
-        NextCycleToggleA = localEpoch + (cycleAoutput ? prog.cycleConfig.runSeconds : prog.cycleConfig.stopSeconds);
+        NextCycleToggleA = now + (cycleAoutput ? prog.cycleConfig.runSeconds : prog.cycleConfig.stopSeconds);
       }
     } else {
       // Stop cycle
@@ -1651,11 +1641,11 @@ bool runCycleTimer(const char *output, bool active, const ProgramDetails &prog, 
         // Initialize cycle
         cycleBoutput = prog.cycleConfig.startHigh;
         cycleBRunning = true;
-        NextCycleToggleB = localEpoch + (cycleBoutput ? prog.cycleConfig.runSeconds : prog.cycleConfig.stopSeconds);
-      } else if (localEpoch >= NextCycleToggleB) {
+        NextCycleToggleB = now + (cycleBoutput ? prog.cycleConfig.runSeconds : prog.cycleConfig.stopSeconds);
+      } else if (now >= NextCycleToggleB) {
         // Toggle state
         cycleBoutput = !cycleBoutput;
-        NextCycleToggleB = localEpoch + (cycleBoutput ? prog.cycleConfig.runSeconds : prog.cycleConfig.stopSeconds);
+        NextCycleToggleB = now + (cycleBoutput ? prog.cycleConfig.runSeconds : prog.cycleConfig.stopSeconds);
       }
     } else {
       // Stop cycle
@@ -1967,10 +1957,9 @@ void sendProgramCache() {
       DEBUG_PRINT(1, "Sent program_cache to client #%u\n", pair.first->id());
     }
   }
-  Serial.println("Sent ProgramCache data");
 }
 
-void updateOutputs(time_t localEpoch) {
+void updateOutputs() {
   outputAState = false;
   outputBState = false;
 
@@ -1978,38 +1967,38 @@ void updateOutputs(time_t localEpoch) {
     for (const auto &prog : ProgramCache) {
       if (prog.id == activeProgramA) {
         if (prog.trigger == "Cycle Timer") {
-          outputAState = runCycleTimer("A", true, prog, localEpoch);
+          outputAState = runCycleTimer("A", true, prog);
         } else if (prog.trigger == "Always On") {
           outputAState = true;
-          runCycleTimer("A", false, prog, localEpoch);  // Stop any running cycle
+          runCycleTimer("A", false, prog);  // Stop any running cycle
         } else {
-          runCycleTimer("A", false, prog, localEpoch);  // Stop any running cycle
+          runCycleTimer("A", false, prog);  // Stop any running cycle
           // Add sensor-based logic if needed
         }
         break;  // Found the program, no need to continue
       }
     }
   } else {
-    runCycleTimer("A", false, ProgramDetails{}, localEpoch);  // Stop cycle with default struct
+    runCycleTimer("A", false, ProgramDetails{});  // Stop cycle with default struct
   }
 
   if (activeProgramB > 0) {
     for (const auto &prog : ProgramCache) {
       if (prog.id == activeProgramB) {
         if (prog.trigger == "Cycle Timer") {
-          outputBState = runCycleTimer("B", true, prog, localEpoch);
+          outputBState = runCycleTimer("B", true, prog);
         } else if (prog.trigger == "Always On") {
           outputBState = true;
-          runCycleTimer("B", false, prog, localEpoch);  // Stop any running cycle
+          runCycleTimer("B", false, prog);  // Stop any running cycle
         } else {
-          runCycleTimer("B", false, prog, localEpoch);  // Stop any running cycle
+          runCycleTimer("B", false, prog);  // Stop any running cycle
           // Add sensor-based logic if needed
         }
         break;
       }
     }
   } else {
-    runCycleTimer("B", false, ProgramDetails{}, localEpoch);  // Stop cycle with default struct
+    runCycleTimer("B", false, ProgramDetails{});  // Stop cycle with default struct
   }
 
   digitalWrite(OUTPUT_A_PIN, outputAState ? HIGH : LOW);
@@ -2263,7 +2252,7 @@ void loop() {
         DEBUG_PRINTLN(1, "nextTransB has passed, updating priorities");
         setProgramPriorities(localEpoch);
       }
-      updateOutputs(localEpoch);
+      updateOutputs();
     }
     pollSensors();
     lastOutputUpdate = millis();
