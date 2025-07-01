@@ -50,3 +50,4 @@
  - 0.3.7: Refresh-sensors. 29 Jun 25
  - 0.4: Cycle timer running.
  - 0.4.1: Send Cycle Timer info.
+ - 0.4.2: Standard Program IDs, cycle timer info.

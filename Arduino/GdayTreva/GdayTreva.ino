@@ -94,17 +94,6 @@ struct CycleConfig {
 
 std::vector<int> null_program_ids;
 
-// Cycle Timer state
-struct CycleState {
-  bool isRunning;
-  unsigned long lastSwitchTime;
-  bool isOnPhase;
-  int activeProgram;
-  time_t nextToggle;
-};
-CycleState cycleStateA = { false, 0, false, -1 };
-CycleState cycleStateB = { false, 0, false, -1 };
-
 static bool eth_connected = false;
 static bool wifi_connected = false;
 static bool internet_connected = false;
@@ -1022,6 +1011,55 @@ void networkEvent(arduino_event_id_t event) {
   }
 }
 
+void sendCycleTimerInfo(bool newClient = false) {
+  static time_t lastNextCycleToggleA = 0;
+  static time_t lastNextCycleToggleB = 0;
+
+  // Skip change check for new clients or if subscriber_epochs is empty
+  if (!newClient && !subscriber_epochs.empty()) {
+    // Only send if toggle times have changed for non-new clients
+    if (NextCycleToggleA == lastNextCycleToggleA && NextCycleToggleB == lastNextCycleToggleB) {
+      return;  // No change, skip sending
+    }
+  }
+
+  if (subscriber_epochs.empty()) {
+    // Update stored values even if no subscribers to avoid sending stale data later
+    lastNextCycleToggleA = NextCycleToggleA;
+    lastNextCycleToggleB = NextCycleToggleB;
+    return;
+  }
+
+  uint32_t new_epoch = millis();
+  DynamicJsonDocument doc(256);  // Estimated size for small JSON
+  doc["type"] = "cycle_timer_status";
+  doc["epoch"] = new_epoch;
+  doc["NextCycleToggleA"] = NextCycleToggleA;
+  doc["NextCycleToggleB"] = NextCycleToggleB;
+
+  char buffer[256];
+  size_t len = serializeJson(doc, buffer, sizeof(buffer));
+  if (len == 0) {
+    Serial.println("sendCycleTimerInfo: JSON serialization failed");
+    xSemaphoreGive(sensorMutex);  // Note: This may be incorrect; see below
+    return;
+  }
+
+  for (auto &pair : subscriber_epochs) {
+    if (newClient || new_epoch > pair.second) {
+      pair.first->text(buffer);
+      pair.second = new_epoch;
+      DEBUG_PRINT(2, "Sent cycle_timer_status to client #%u\n", pair.first->id());
+    }
+  }
+  DEBUG_PRINT(1, "Sent cycle_timer_status: NextCycleToggleA=%ld, NextCycleToggleB=%ld\n",
+              NextCycleToggleA, NextCycleToggleB);
+
+  // Update last sent values
+  lastNextCycleToggleA = NextCycleToggleA;
+  lastNextCycleToggleB = NextCycleToggleB;
+}
+
 void onWsEvent(AsyncWebSocket *server, AsyncWebSocketClient *client, AwsEventType type, void *arg, uint8_t *data, size_t len) {
   switch (type) {
     case WS_EVT_CONNECT:
@@ -1039,6 +1077,7 @@ void onWsEvent(AsyncWebSocket *server, AsyncWebSocketClient *client, AwsEventTyp
       sendActiveprograms();
       sendDiscoveredSensors();
       sendProgramCache();
+      sendCycleTimerInfo(true);
       break;
     case WS_EVT_DISCONNECT:
       DEBUG_PRINT(2, "WebSocket client #%u disconnected\n", client->id());
@@ -1055,11 +1094,15 @@ void onWsEvent(AsyncWebSocket *server, AsyncWebSocketClient *client, AwsEventTyp
             subscriber_epochs[client] = 0;
             DEBUG_PRINT(1, "Client #%u subscribed to status\n", client->id());
             sendActiveprograms();
+            sendDiscoveredSensors();
+            sendProgramCache();
+            sendCycleTimerInfo(true);
           } else if (command && strcmp(command, "unsubscribe_output_status") == 0) {
             subscriber_epochs.erase(client);
             DEBUG_PRINT(1, "Client #%u unsubscribed from status\n", client->id());
           } else if (command && strcmp(command, "get_output_status") == 0) {
             sendActiveprograms();
+            sendCycleTimerInfo(true);
           } else if (command && strcmp(command, "get_discovered_sensors") == 0) {
             sendDiscoveredSensors();
           } else if (command && strcmp(command, "sync_time") == 0) {
@@ -1079,6 +1122,7 @@ void onWsEvent(AsyncWebSocket *server, AsyncWebSocketClient *client, AwsEventTyp
             sendProgramCache();
           } else if (command && strcmp(command, "refresh-sensors") == 0) {
             requestSensorScan();
+            sendDiscoveredSensors();
           } else if (command && strcmp(command, "set_time_offset") == 0) {
             int offset = 0;
             String device_name = "";
@@ -1557,51 +1601,6 @@ time_t parseISO8601(const char *dateTime) {
 time_t getAdjustedTime() {
   time_t now = time(nullptr);
   return now + (config.time_offset_minutes * 60);
-}
-
-void sendCycleTimerInfo() {
-  static time_t lastNextCycleToggleA = 0;
-  static time_t lastNextCycleToggleB = 0;
-
-  // Only send if toggle times have changed
-  if (NextCycleToggleA == lastNextCycleToggleA && NextCycleToggleB == lastNextCycleToggleB) {
-    return;  // No change, skip sending
-  }
-
-  if (subscriber_epochs.empty()) {
-    // Update stored values even if no subscribers to avoid sending stale data later
-    lastNextCycleToggleA = NextCycleToggleA;
-    lastNextCycleToggleB = NextCycleToggleB;
-    return;
-  }
-  uint32_t new_epoch = millis();
-  DynamicJsonDocument doc(256);  // Estimated size for small JSON
-  doc["type"] = "cycle_timer_status";
-  doc["epoch"] = new_epoch;
-  doc["NextCycleToggleA"] = NextCycleToggleA;
-  doc["NextCycleToggleB"] = NextCycleToggleB;
-
-  char buffer[256];
-  size_t len = serializeJson(doc, buffer, sizeof(buffer));
-  if (len == 0) {
-    Serial.println("sendCycleTimerInfo: JSON serialization failed");
-    xSemaphoreGive(sensorMutex);
-    return;
-  }
-
-  for (auto &pair : subscriber_epochs) {
-    if (new_epoch > pair.second) {
-      pair.first->text(buffer);
-      pair.second = new_epoch;
-      DEBUG_PRINT(2, "Sent cycle_timer_status to client #%u\n", pair.first->id());
-    }
-  }
-  DEBUG_PRINT(1, "Sent cycle timer status: NextCycleToggleA=%ld, NextCycleToggleB=%ld\n",
-              NextCycleToggleA, NextCycleToggleB);
-
-  // Update last sent values
-  lastNextCycleToggleA = NextCycleToggleA;
-  lastNextCycleToggleB = NextCycleToggleB;
 }
 
 bool runCycleTimer(const char *output, bool active, const ProgramDetails &prog, time_t localEpoch) {
@@ -2088,6 +2087,42 @@ void updateDebugLevel() {
     }
   }
 }
+void standardizeProgramIDs() {
+  if (xSemaphoreTake(littlefsMutex, portTICK_PERIOD_MS * 1000) == pdTRUE) {
+    for (int i = 1; i < 10; i++) {
+      String oldFilename = "/program" + String(i) + ".json";
+      String newFilename = "/program0" + String(i) + ".json";
+
+      // Check if old file exists and new file does not
+      if (LittleFS.exists(oldFilename) && !LittleFS.exists(newFilename)) {
+        if (LittleFS.rename(oldFilename, newFilename)) {
+          DEBUG_PRINT(1, "Renamed %s to %s\n", oldFilename.c_str(), newFilename.c_str());
+
+          // Update ProgramCache
+          for (auto &prog : ProgramCache) {
+            if (prog.id == i) {
+              prog.id = i;  // ID remains the same, but ensure consistency
+              DEBUG_PRINT(2, "Updated ProgramCache ID %d for %s\n", prog.id, newFilename.c_str());
+            }
+          }
+
+          // Update null_program_ids
+          for (auto it = null_program_ids.begin(); it != null_program_ids.end(); ++it) {
+            if (*it == i) {
+              *it = i;  // ID remains the same, but ensure consistency
+              DEBUG_PRINT(2, "Updated null_program_ids ID %d\n", i);
+            }
+          }
+        } else {
+          DEBUG_PRINT(1, "Failed to rename %s to %s\n", oldFilename.c_str(), newFilename.c_str());
+        }
+      }
+    }
+    xSemaphoreGive(littlefsMutex);
+  } else {
+    DEBUG_PRINT(1, "Failed to acquire LittleFS mutex for standardizeProgramIDs\n");
+  }
+}
 
 void setup() {
   Serial.begin(115200);
@@ -2114,6 +2149,9 @@ void setup() {
     return;
   }
   readSettings();
+
+  standardizeProgramIDs();
+
   pinMode(5, OUTPUT);
   digitalWrite(5, HIGH);
   pinMode(OUTPUT_A_PIN, OUTPUT);
