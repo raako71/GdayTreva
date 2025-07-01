@@ -50,3 +50,4 @@ R0.47: Device Name. 28 Jun 25
 R0.48: Use Program Cache for web ui. 29 Jun 25
 R0.49: refresh-sensors, 25 char limit for text fields, default empty trigger option.
 R0.50: default options for Program Editor. CSS.
+R0.51: Display Cycle Timer.

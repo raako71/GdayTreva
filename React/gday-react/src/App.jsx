@@ -18,6 +18,7 @@ function App() {
   const [activeProgramData, setActiveProgramData] = useState(null);
   const [sensors, setSensors] = useState([]);
   const [programCache, setProgramCache] = useState([]);
+  const [cycleTimerStatus, setCycleTimerStatus] = useState({ NextCycleToggleA: 0, NextCycleToggleB: 0 });
 
   const requestNetworkInfo = useCallback(() => {
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
@@ -26,6 +27,7 @@ function App() {
       console.warn('WebSocket not connected, cannot request network info');
     }
   }, []);
+
   const refreshSensors = useCallback(() => {
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
       wsRef.current.send(JSON.stringify({ command: 'refresh-sensors' }));
@@ -33,7 +35,6 @@ function App() {
       console.warn('WebSocket not connected, cannot request network info');
     }
   }, []);
-  
 
   useEffect(() => {
     const fetchConfig = async () => {
@@ -81,7 +82,6 @@ function App() {
           setConnectionStatus('Connected');
           setIsWsReady(true);
           retryDelay = 1000;
-          //wsRef.current.send(JSON.stringify({ command: 'get_discovered_sensors' }));
         }
       };
 
@@ -103,7 +103,6 @@ function App() {
                   offset_minutes: data.offset_minutes,
                   device_name: data.device_name || prev.device_name || '',
                 }));
-                //console.log('Received time_offset:', data);
                 break;
               case 'network_info':
                 setNetworkInfo(data);
@@ -116,15 +115,18 @@ function App() {
                 break;
               case 'active_program_data':
                 setActiveProgramData(data);
-                //console.log('active_program_data:', data);
                 break;
               case 'discovered_sensors':
                 setSensors(data.sensors || []);
-                //console.log('Received discovered_sensors:', data);
                 break;
               case 'program_cache':
                 setProgramCache(data.programs || []);
-                //console.log('Received program_cache:', data);
+                break;
+              case 'cycle_timer_status':
+                setCycleTimerStatus({
+                  NextCycleToggleA: data.NextCycleToggleA || 0,
+                  NextCycleToggleB: data.NextCycleToggleB || 0,
+                });
                 break;
               default:
                 console.warn('Unknown message type:', data.type);
@@ -170,11 +172,40 @@ function App() {
     <div className="App">
       <TimeBar message={message} wsRef={wsRef} />
       <Routes>
-        <Route path="/" element={<Home message={message} wsRef={wsRef} isWsReady={isWsReady} activeProgramData={activeProgramData} programCache={programCache} />} />
+        <Route
+          path="/"
+          element={
+            <Home
+              message={message}
+              wsRef={wsRef}
+              isWsReady={isWsReady}
+              activeProgramData={activeProgramData}
+              programCache={programCache}
+              cycleTimerStatus={cycleTimerStatus}
+            />
+          }
+        />
         <Route path="/graph" element={<Graph />} />
-        <Route path="/settings" element={<Settings requestNetworkInfo={requestNetworkInfo} refreshSensors={refreshSensors} networkInfo={networkInfo} connectionStatus={connectionStatus} sensors={sensors} />} />
-        <Route path="/programs" element={<Programs wsRef={wsRef} isWsReady={isWsReady} programCache={programCache}/>} />
-        <Route path="/programEditor" element={<ProgramEditor wsRef={wsRef} isWsReady={isWsReady} sensors={sensors} programCache={programCache}/>} />
+        <Route
+          path="/settings"
+          element={
+            <Settings
+              requestNetworkInfo={requestNetworkInfo}
+              refreshSensors={refreshSensors}
+              networkInfo={networkInfo}
+              connectionStatus={connectionStatus}
+              sensors={sensors}
+            />
+          }
+        />
+        <Route
+          path="/programs"
+          element={<Programs wsRef={wsRef} isWsReady={isWsReady} programCache={programCache} />}
+        />
+        <Route
+          path="/programEditor"
+          element={<ProgramEditor wsRef={wsRef} isWsReady={isWsReady} sensors={sensors} programCache={programCache} />}
+        />
       </Routes>
     </div>
   );

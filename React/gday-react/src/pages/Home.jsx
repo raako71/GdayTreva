@@ -14,25 +14,29 @@ const formatCountdown = (secondsLeft) => {
     .padStart(2, '0')}m ${seconds.toString().padStart(2, '0')}s`;
 };
 
-function Home({ activeProgramData, programCache, message }) {
+function Home({ activeProgramData, programCache, message, cycleTimerStatus }) {
   const [countdowns, setCountdowns] = useState({});
   const triggerStatusRef = useRef(activeProgramData);
   const messageRef = useRef(message);
+  const cycleTimerStatusRef = useRef(cycleTimerStatus);
+
+  useEffect(() => {
+  console.log('activeProgramData:', activeProgramData);
+}, [activeProgramData]);
 
   // Update refs with latest props
   useEffect(() => {
     triggerStatusRef.current = activeProgramData;
     messageRef.current = message;
-  }, [activeProgramData, message]);
+    cycleTimerStatusRef.current = cycleTimerStatus;
+  }, [activeProgramData, message, cycleTimerStatus]);
 
   // Update countdowns every second for cycle timer programs
   useEffect(() => {
     const interval = setInterval(() => {
       const currentTriggerStatus = triggerStatusRef.current;
       const currentMessage = messageRef.current;
-
-      // Safely access progs, defaulting to empty array if undefined
-      const progs = currentTriggerStatus?.progs || [];
+      const currentCycleTimerStatus = cycleTimerStatusRef.current;
 
       // Skip if no programs or epoch is invalid
       if (programCache.length === 0 || currentMessage?.epoch == null) {
@@ -47,13 +51,24 @@ function Home({ activeProgramData, programCache, message }) {
           prog.enabled &&
           prog.trigger === 'Cycle Timer' &&
           prog.cycleConfig?.valid &&
-          currentTriggerStatus?.progs
+          prog.output !== 'null'
         ) {
-          // Find corresponding active program to get next_toggle
-          const activeProg = progs.find((p) => p.id === prog.id);
-          if (activeProg && typeof activeProg.next_toggle === 'number' && !isNaN(activeProg.next_toggle)) {
-            const secondsLeft = activeProg.next_toggle - currentMessage.epoch;
-            newCountdowns[String(prog.id)] = formatCountdown(secondsLeft);
+          // Determine active program IDs from activeProgramData
+          if (prog) {
+            let nextToggle;
+            if (prog.output === 'A' && currentCycleTimerStatus.NextCycleToggleA !== undefined && currentCycleTimerStatus.NextCycleToggleA !== null) {
+              nextToggle = currentCycleTimerStatus.NextCycleToggleA;
+            } else if (prog.output === 'B' && currentCycleTimerStatus.NextCycleToggleB !== undefined && currentCycleTimerStatus.NextCycleToggleB !== null) {
+              nextToggle = currentCycleTimerStatus.NextCycleToggleB;
+            }
+            if (nextToggle && typeof nextToggle === 'number' && !isNaN(nextToggle)) {
+              const secondsLeft = nextToggle - currentMessage.epoch;
+              newCountdowns[String(prog.id)] = formatCountdown(secondsLeft);
+            } else {
+              newCountdowns[String(prog.id)] = 'Awaiting Schedule';
+            }
+          } else {
+            newCountdowns[String(prog.id)] = 'Inactive';
           }
         }
       });
@@ -67,7 +82,7 @@ function Home({ activeProgramData, programCache, message }) {
     }, 1000);
 
     return () => clearInterval(interval);
-  }, [programCache]);
+  }, [programCache, cycleTimerStatus]);
 
   // Memoize program tiles to prevent unnecessary re-renders
   const programTiles = useMemo(() => {
@@ -76,11 +91,11 @@ function Home({ activeProgramData, programCache, message }) {
     }
 
     return programCache
-      .filter((prog) => prog.enabled) // Only show enabled programs
+      .filter((prog) => prog.enabled)
       .map((prog) => {
         const programId = prog.id.toString().padStart(2, '0');
         const programName = prog.name || `Program${programId}`;
-        
+
         // Determine trigger display
         const triggerDisplay = prog.trigger === 'Sensor' && prog.sensorCapability
           ? `Capability: ${prog.sensorCapability}`
@@ -147,7 +162,6 @@ Home.propTypes = {
         id: PropTypes.number.isRequired,
         output: PropTypes.string,
         trigger: PropTypes.string,
-        next_toggle: PropTypes.number,
         state: PropTypes.bool,
       })
     ),
@@ -184,14 +198,19 @@ Home.propTypes = {
     mem_used: PropTypes.number,
     mem_total: PropTypes.number,
     type: PropTypes.string,
-    device_name: PropTypes.string, // Added for device_name
+    device_name: PropTypes.string,
+  }),
+  cycleTimerStatus: PropTypes.shape({
+    NextCycleToggleA: PropTypes.number,
+    NextCycleToggleB: PropTypes.number,
   }),
 };
 
 Home.defaultProps = {
   activeProgramData: { progs: [], sensors: [] },
   programCache: [],
-  message: { epoch: 0, device_name: '' }, // Added device_name default
+  message: { epoch: 0, device_name: '' },
+  cycleTimerStatus: { NextCycleToggleA: 0, NextCycleToggleB: 0 },
 };
 
 export default Home;
