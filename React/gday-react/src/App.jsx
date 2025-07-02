@@ -32,7 +32,23 @@ function App() {
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
       wsRef.current.send(JSON.stringify({ command: 'refresh-sensors' }));
     } else {
-      console.warn('WebSocket not connected, cannot request network info');
+      console.warn('WebSocket not connected, cannot request sensors');
+    }
+  }, []);
+
+  const getPrograms = useCallback(() => {
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({ command: 'get_program_cache' }));
+    } else {
+      console.warn('WebSocket not connected, cannot request sensors');
+    }
+  }, []);
+
+  const getSensors = useCallback(() => {
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({ command: 'get_discovered_sensors' }));
+    } else {
+      console.warn('WebSocket not connected, cannot request sensors');
     }
   }, []);
 
@@ -82,6 +98,7 @@ function App() {
           setConnectionStatus('Connected');
           setIsWsReady(true);
           retryDelay = 1000;
+          ws.send(JSON.stringify({ command: 'subscribe_output_status' }));
         }
       };
 

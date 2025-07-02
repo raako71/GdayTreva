@@ -64,6 +64,7 @@ function ProgramEditor({ wsRef, isWsReady, programCache, sensors }) {
     if (id) {
       const parsedID = parseInt(id, 10);
       if (!isNaN(parsedID) && parsedID >= 1 && parsedID <= 10) {
+        setProgramID(parsedID.toString().padStart(2, '0')); // Update programID state
         const program = programCache.find((p) => p.id === parsedID);
         if (program) {
           setName(program.name || '');
@@ -127,10 +128,11 @@ function ProgramEditor({ wsRef, isWsReady, programCache, sensors }) {
     const handleMessage = (event) => {
       try {
         const data = JSON.parse(event.data);
+        console.log('Received WebSocket message:', data); // Added for debugging
         if (data.type === 'save_program_response') {
           if (data.success) {
             const assignedID = data.programID || programID;
-            setProgramID(assignedID);
+            setProgramID(assignedID.toString().padStart(2, '0')); // Ensure string format
             setStatus(`Program ${assignedID} saved successfully`);
             setError(null);
             navigate('/programs');
@@ -270,6 +272,7 @@ function ProgramEditor({ wsRef, isWsReady, programCache, sensors }) {
         programID,
         content: sanitizedContent,
       };
+      console.log('Sending WebSocket message:', message); // Keep for debugging
       wsRef.current.send(JSON.stringify(message));
       setStatus(`Program ${programID} save requested`);
     } else {
@@ -582,7 +585,7 @@ function ProgramEditor({ wsRef, isWsReady, programCache, sensors }) {
                 id="endTime"
                 type="time"
                 value={endTime}
-                onChange={(e) => setEndTime(e.target.value)}
+                onChange={(e) => setEndDate(e.target.value)}
                 className="input-field"
               />
               <small className="form-text">Time when the program ends each day.</small>

@@ -92,7 +92,7 @@
   border: #009a0a;
   border-style: solid;
   padding: 10px;
-  min-width: 100px;
+  min-width: fit-content;
   max-width: 250px;
   border-radius: 10px;
   margin: 10px;
@@ -101,6 +101,7 @@
 .Tile-container {
   display: flex;
   justify-content: center;
+  flex-wrap: wrap;
 }
 
 table {

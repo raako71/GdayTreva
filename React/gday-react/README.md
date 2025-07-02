@@ -52,3 +52,4 @@ R0.49: refresh-sensors, 25 char limit for text fields, default empty trigger opt
 R0.50: default options for Program Editor. CSS.
 R0.51: Display Cycle Timer.
 R0.52: Display state for Cycle Timer.
+R0.53: getPrograms, getSensors, subscribe_output_status, flex wrap, fix program saving.
