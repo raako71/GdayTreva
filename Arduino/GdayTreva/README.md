@@ -54,3 +54,4 @@
  - 0.4.3: Absolute epoch for cycletimer, send state with cycle timer info.
  - 0.4.4: Default no serial.
  - 0.4.5: Overflow issues.
+ - 0.4.6: Reset Cycle Timer on program save.

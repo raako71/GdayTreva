@@ -1383,7 +1383,7 @@ void updateProgramCache(const char *programID = nullptr) {
       }
       if (programID) {
         if (activeProgramA == i || i == activeProgramB) {
-          runCycleTimer(details.output, false, details);
+          runCycleTimer(details.output.c_str(), false, details);
           DEBUG_PRINT(1, "Program %d: Triggered runCycleTimer for output %s\n", i, details.output.c_str());
         }
       }
