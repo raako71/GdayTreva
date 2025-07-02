@@ -1189,6 +1189,213 @@ String getNextProgramID() {
   return "";
 }
 
+//set active programs and transition times.
+void setProgramPriorities(time_t now) {
+  activeProgramA = -1;
+  activeProgramB = -1;
+  nextTransA = LONG_MAX;
+  nextTransB = LONG_MAX;
+
+  for (const auto &prog : ProgramCache) {
+    if (!prog.enabled && prog.output != "null") {
+      continue;
+    }
+
+    PriorityResult result = determineProgramPriority(prog, now);
+
+    // Handle active programs (lowest ID for each output)
+    if (result.isActive) {
+      if (prog.output == "A" && (activeProgramA == -1 || prog.id < activeProgramA)) {
+        activeProgramA = prog.id;
+        //DEBUG_PRINT(3, "Program %d: Set as activeProgramA\n", prog.id);
+      } else if (prog.output == "B" && (activeProgramB == -1 || prog.id < activeProgramB)) {
+        activeProgramB = prog.id;
+        //DEBUG_PRINT(3, "Program %d: Set as activeProgramB\n", prog.id);
+      }
+    }
+
+    // Handle next transition (earliest epoch for each output)
+    if (result.nextTransition >= 0) {
+      if (prog.output == "A" && result.nextTransition < nextTransA) {
+        nextTransA = result.nextTransition;
+        //DEBUG_PRINT(3, "Program %d: Updated nextTransA to %ld\n", prog.id, nextTransA);
+      } else if (prog.output == "B" && result.nextTransition < nextTransB) {
+        nextTransB = result.nextTransition;
+        //DEBUG_PRINT(3, "Program %d: Updated nextTransB to %ld\n", prog.id, nextTransB);
+      }
+    }
+  }
+  if (activeProgramA == -1) {
+    outputAState = false;
+    digitalWrite(OUTPUT_A_PIN, LOW);
+  }
+  if (activeProgramB == -1) {
+    outputBState = false;
+    digitalWrite(OUTPUT_B_PIN, LOW);
+  }
+
+  DEBUG_PRINT(1, "Programs set: activeProgramA=%d, activeProgramB=%d, nextTransA=%ld, nextTransB=%ld\n",
+              activeProgramA, activeProgramB, nextTransA, nextTransB);
+  updateActiveSensors();
+}
+
+bool runCycleTimer(const char *output, bool active, const ProgramDetails &prog) {
+  static bool cycleARunning = false;
+  static bool cycleAoutput = false;
+  static bool cycleBRunning = false;
+  static bool cycleBoutput = false;
+  time_t now = time(nullptr);
+
+  // Early validation check
+  if (active && !prog.cycleConfig.valid) {
+    DEBUG_PRINT(2, "ERROR: CycleTimer for %s invalid\n", output);
+    if (strcmp(output, "A") == 0) {
+      cycleAoutput = false;
+      cycleARunning = false;
+      NextCycleToggleA = 0;
+    } else if (strcmp(output, "B") == 0) {
+      cycleBoutput = false;
+      cycleBRunning = false;
+      NextCycleToggleB = 0;
+    }
+    sendCycleTimerInfo();  // Notify clients if toggle times changed
+    return false;
+  }
+
+  if (strcmp(output, "A") == 0) {
+    if (active) {
+      if (!cycleARunning) {
+        // Initialize cycle
+        cycleAoutput = prog.cycleConfig.startHigh;
+        cycleARunning = true;
+        NextCycleToggleA = now + (cycleAoutput ? prog.cycleConfig.runSeconds : prog.cycleConfig.stopSeconds);
+      } else if (now >= NextCycleToggleA) {
+        // Toggle state
+        cycleAoutput = !cycleAoutput;
+        NextCycleToggleA = now + (cycleAoutput ? prog.cycleConfig.runSeconds : prog.cycleConfig.stopSeconds);
+      }
+    } else {
+      // Stop cycle
+      cycleAoutput = false;
+      cycleARunning = false;
+      NextCycleToggleA = 0;
+    }
+    sendCycleTimerInfo();  // Notify clients if toggle times changed
+    return cycleAoutput;
+  } else if (strcmp(output, "B") == 0) {
+    if (active) {
+      if (!cycleBRunning) {
+        // Initialize cycle
+        cycleBoutput = prog.cycleConfig.startHigh;
+        cycleBRunning = true;
+        NextCycleToggleB = now + (cycleBoutput ? prog.cycleConfig.runSeconds : prog.cycleConfig.stopSeconds);
+      } else if (now >= NextCycleToggleB) {
+        // Toggle state
+        cycleBoutput = !cycleBoutput;
+        NextCycleToggleB = now + (cycleBoutput ? prog.cycleConfig.runSeconds : prog.cycleConfig.stopSeconds);
+      }
+    } else {
+      // Stop cycle
+      cycleBoutput = false;
+      cycleBRunning = false;
+      NextCycleToggleB = 0;
+    }
+    sendCycleTimerInfo();  // Notify clients if toggle times changed
+    return cycleBoutput;
+  }
+
+  DEBUG_PRINT(2, "ERROR: Invalid output %s\n", output);
+  sendCycleTimerInfo();  // Notify clients if toggle times changed
+  return false;
+}
+
+//update program cache from flash.
+void updateProgramCache(const char *programID = nullptr) {
+  DEBUG_PRINTLN(1, "Updating program cache...");
+  ProgramCache.clear();
+  null_program_ids.clear();
+
+  time_t localEpoch = getAdjustedTime();
+
+  for (int i = 1; i <= numPrograms; i++) {
+    String filename = "/program" + String(i < 10 ? "0" + String(i) : String(i)) + ".json";
+    if (xSemaphoreTake(littlefsMutex, portTICK_PERIOD_MS * 1000) == pdTRUE) {
+      if (!LittleFS.exists(filename)) {
+        DEBUG_PRINT(2, "Program %d: File %s does not exist\n", i, filename.c_str());
+        xSemaphoreGive(littlefsMutex);
+        continue;
+      }
+      File file = LittleFS.open(filename, FILE_READ);
+      if (!file) {
+        xSemaphoreGive(littlefsMutex);
+        DEBUG_PRINT(1, "Program %d: Failed to open file %s\n", i, filename.c_str());
+        continue;
+      }
+      String content = file.readString();
+      file.close();
+      xSemaphoreGive(littlefsMutex);
+      StaticJsonDocument<4096> doc;
+      if (deserializeJson(doc, content)) {
+        DEBUG_PRINT(1, "Program %d: Failed to parse JSON\n", i);
+        continue;
+      }
+
+      ProgramDetails details;
+      details.id = i;
+      details.name = doc["name"].as<String>();
+      details.enabled = doc["enabled"].as<bool>();
+      details.output = doc["output"].as<String>() ?: "null";
+      details.startDate = doc["startDate"].as<String>();
+      details.startDateEnabled = doc["startDateEnabled"].as<bool>();
+      details.endDate = doc["endDate"].as<String>();
+      details.endDateEnabled = doc["endDateEnabled"].as<bool>();
+      details.startTime = doc["startTime"].as<String>();
+      details.startTimeEnabled = doc["startTimeEnabled"].as<bool>();
+      details.endTime = doc["endTime"].as<String>();
+      details.endTimeEnabled = doc["endTimeEnabled"].as<bool>();
+      JsonArray daysArray = doc["selectedDays"];
+      details.selectedDays.clear();
+      for (JsonVariant day : daysArray) {
+        details.selectedDays.push_back(day.as<String>());
+      }
+      details.daysPerWeekEnabled = doc["daysPerWeekEnabled"].as<bool>();
+      details.trigger = doc["trigger"].as<String>();
+      details.sensorType = doc["sensorType"].as<String>() ?: "";
+      details.sensorAddress = strtol(doc["sensorAddress"].as<const char *>() ?: "0", nullptr, 16);
+      details.sensorCapability = doc["sensorCapability"].as<String>() ?: "";
+      details.cycleConfig = { 0, 0, false, false };  // Default initialization
+      if (details.trigger == "Cycle Timer") {
+        details.cycleConfig.runSeconds = (doc["runTime"]["hours"].as<int>() * 3600) + (doc["runTime"]["minutes"].as<int>() * 60) + doc["runTime"]["seconds"].as<int>();
+        details.cycleConfig.stopSeconds = (doc["stopTime"]["hours"].as<int>() * 3600) + (doc["stopTime"]["minutes"].as<int>() * 60) + doc["stopTime"]["seconds"].as<int>();
+        details.cycleConfig.startHigh = doc["startHigh"].as<bool>();
+        details.cycleConfig.valid = (details.cycleConfig.runSeconds > 0 && details.cycleConfig.stopSeconds > 0);
+        DEBUG_PRINT(3, "Program %d: Parsed CycleConfig - runSeconds=%d, stopSeconds=%d, startHigh=%d, valid=%d\n",
+                    i, details.cycleConfig.runSeconds, details.cycleConfig.stopSeconds,
+                    details.cycleConfig.startHigh, details.cycleConfig.valid);
+      }
+      if (details.output.equalsIgnoreCase("null") && details.enabled) {
+        null_program_ids.push_back(details.id);
+        ProgramCache.push_back(details);
+        DEBUG_PRINT(1, "Program %d: Added to null_program_ids and Program Cache\n", i);
+      } else {
+        DEBUG_PRINT(3, "Program %d: Loaded, Output=%s, Enabled=%d\n", i, details.output.c_str(), details.enabled);
+        ProgramCache.push_back(details);
+      }
+      if (programID) {
+        if (activeProgramA == i || i == activeProgramB) {
+          runCycleTimer(details.output, false, details);
+          DEBUG_PRINT(1, "Program %d: Triggered runCycleTimer for output %s\n", i, details.output.c_str());
+        }
+      }
+    } else {
+      DEBUG_PRINT(1, "Program %d: Failed to acquire LittleFS mutex\n", i);
+    }
+  }
+  DEBUG_PRINTLN(1, "Program cache updated.");
+  setProgramPriorities(localEpoch);
+  sendProgramCache();
+}
+
 void sendProgramResponse(AsyncWebSocketClient *client, bool success, const char *message, const char *programID) {
   StaticJsonDocument<512> response;
   response["type"] = "save_program_response";
@@ -1316,8 +1523,7 @@ void handleSaveProgram(AsyncWebSocketClient *client, const JsonDocument &doc) {
     file.close();
     xSemaphoreGive(littlefsMutex);
     sendProgramResponse(client, true, "Program saved successfully", targetID.c_str());
-    time_t now = getAdjustedTime();
-    updateProgramCache();
+    updateProgramCache(programID);
   } else {
     sendProgramResponse(client, false, "Failed to acquire filesystem lock", targetID.c_str());
   }
@@ -1602,76 +1808,6 @@ time_t getAdjustedTime() {
   return now + (config.time_offset_minutes * 60);
 }
 
-bool runCycleTimer(const char *output, bool active, const ProgramDetails &prog) {
-  static bool cycleARunning = false;
-  static bool cycleAoutput = false;
-  static bool cycleBRunning = false;
-  static bool cycleBoutput = false;
-  time_t now = time(nullptr);
-
-  // Early validation check
-  if (active && !prog.cycleConfig.valid) {
-    DEBUG_PRINT(2, "ERROR: CycleTimer for %s invalid\n", output);
-    if (strcmp(output, "A") == 0) {
-      cycleAoutput = false;
-      cycleARunning = false;
-      NextCycleToggleA = 0;
-    } else if (strcmp(output, "B") == 0) {
-      cycleBoutput = false;
-      cycleBRunning = false;
-      NextCycleToggleB = 0;
-    }
-    sendCycleTimerInfo();  // Notify clients if toggle times changed
-    return false;
-  }
-
-  if (strcmp(output, "A") == 0) {
-    if (active) {
-      if (!cycleARunning) {
-        // Initialize cycle
-        cycleAoutput = prog.cycleConfig.startHigh;
-        cycleARunning = true;
-        NextCycleToggleA = now + (cycleAoutput ? prog.cycleConfig.runSeconds : prog.cycleConfig.stopSeconds);
-      } else if (now >= NextCycleToggleA) {
-        // Toggle state
-        cycleAoutput = !cycleAoutput;
-        NextCycleToggleA = now + (cycleAoutput ? prog.cycleConfig.runSeconds : prog.cycleConfig.stopSeconds);
-      }
-    } else {
-      // Stop cycle
-      cycleAoutput = false;
-      cycleARunning = false;
-      NextCycleToggleA = 0;
-    }
-    sendCycleTimerInfo();  // Notify clients if toggle times changed
-    return cycleAoutput;
-  } else if (strcmp(output, "B") == 0) {
-    if (active) {
-      if (!cycleBRunning) {
-        // Initialize cycle
-        cycleBoutput = prog.cycleConfig.startHigh;
-        cycleBRunning = true;
-        NextCycleToggleB = now + (cycleBoutput ? prog.cycleConfig.runSeconds : prog.cycleConfig.stopSeconds);
-      } else if (now >= NextCycleToggleB) {
-        // Toggle state
-        cycleBoutput = !cycleBoutput;
-        NextCycleToggleB = now + (cycleBoutput ? prog.cycleConfig.runSeconds : prog.cycleConfig.stopSeconds);
-      }
-    } else {
-      // Stop cycle
-      cycleBoutput = false;
-      cycleBRunning = false;
-      NextCycleToggleB = 0;
-    }
-    sendCycleTimerInfo();  // Notify clients if toggle times changed
-    return cycleBoutput;
-  }
-
-  DEBUG_PRINT(2, "ERROR: Invalid output %s\n", output);
-  sendCycleTimerInfo();  // Notify clients if toggle times changed
-  return false;
-}
-
 //determine active status and next transition for a program.
 PriorityResult determineProgramPriority(const ProgramDetails &prog, time_t now) {
   PriorityResult result = { false, -1 };
@@ -1779,136 +1915,7 @@ PriorityResult determineProgramPriority(const ProgramDetails &prog, time_t now) 
   }
 }
 
-//set active programs and transition times.
-void setProgramPriorities(time_t now) {
-  activeProgramA = -1;
-  activeProgramB = -1;
-  nextTransA = LONG_MAX;
-  nextTransB = LONG_MAX;
 
-  for (const auto &prog : ProgramCache) {
-    if (!prog.enabled && prog.output != "null") {
-      continue;
-    }
-
-    PriorityResult result = determineProgramPriority(prog, now);
-
-    // Handle active programs (lowest ID for each output)
-    if (result.isActive) {
-      if (prog.output == "A" && (activeProgramA == -1 || prog.id < activeProgramA)) {
-        activeProgramA = prog.id;
-        //DEBUG_PRINT(3, "Program %d: Set as activeProgramA\n", prog.id);
-      } else if (prog.output == "B" && (activeProgramB == -1 || prog.id < activeProgramB)) {
-        activeProgramB = prog.id;
-        //DEBUG_PRINT(3, "Program %d: Set as activeProgramB\n", prog.id);
-      }
-    }
-
-    // Handle next transition (earliest epoch for each output)
-    if (result.nextTransition >= 0) {
-      if (prog.output == "A" && result.nextTransition < nextTransA) {
-        nextTransA = result.nextTransition;
-        //DEBUG_PRINT(3, "Program %d: Updated nextTransA to %ld\n", prog.id, nextTransA);
-      } else if (prog.output == "B" && result.nextTransition < nextTransB) {
-        nextTransB = result.nextTransition;
-        //DEBUG_PRINT(3, "Program %d: Updated nextTransB to %ld\n", prog.id, nextTransB);
-      }
-    }
-  }
-  if (activeProgramA == -1) {
-    outputAState = false;
-    digitalWrite(OUTPUT_A_PIN, LOW);
-  }
-  if (activeProgramB == -1) {
-    outputBState = false;
-    digitalWrite(OUTPUT_B_PIN, LOW);
-  }
-
-  DEBUG_PRINT(1, "Programs set: activeProgramA=%d, activeProgramB=%d, nextTransA=%ld, nextTransB=%ld\n",
-              activeProgramA, activeProgramB, nextTransA, nextTransB);
-  updateActiveSensors();
-}
-
-//update program cache from flash.
-void updateProgramCache() {
-  DEBUG_PRINTLN(1, "Updating program cache...");
-  ProgramCache.clear();
-  null_program_ids.clear();
-
-  time_t localEpoch = getAdjustedTime();
-
-  for (int i = 1; i <= numPrograms; i++) {
-    String filename = "/program" + String(i < 10 ? "0" + String(i) : String(i)) + ".json";
-    if (xSemaphoreTake(littlefsMutex, portTICK_PERIOD_MS * 1000) == pdTRUE) {
-      if (!LittleFS.exists(filename)) {
-        DEBUG_PRINT(2, "Program %d: File %s does not exist\n", i, filename.c_str());
-        xSemaphoreGive(littlefsMutex);
-        continue;
-      }
-      File file = LittleFS.open(filename, FILE_READ);
-      if (!file) {
-        xSemaphoreGive(littlefsMutex);
-        DEBUG_PRINT(1, "Program %d: Failed to open file %s\n", i, filename.c_str());
-        continue;
-      }
-      String content = file.readString();
-      file.close();
-      xSemaphoreGive(littlefsMutex);
-      StaticJsonDocument<4096> doc;
-      if (deserializeJson(doc, content)) {
-        DEBUG_PRINT(1, "Program %d: Failed to parse JSON\n", i);
-        continue;
-      }
-
-      ProgramDetails details;
-      details.id = i;
-      details.name = doc["name"].as<String>();
-      details.enabled = doc["enabled"].as<bool>();
-      details.output = doc["output"].as<String>() ?: "null";
-      details.startDate = doc["startDate"].as<String>();
-      details.startDateEnabled = doc["startDateEnabled"].as<bool>();
-      details.endDate = doc["endDate"].as<String>();
-      details.endDateEnabled = doc["endDateEnabled"].as<bool>();
-      details.startTime = doc["startTime"].as<String>();
-      details.startTimeEnabled = doc["startTimeEnabled"].as<bool>();
-      details.endTime = doc["endTime"].as<String>();
-      details.endTimeEnabled = doc["endTimeEnabled"].as<bool>();
-      JsonArray daysArray = doc["selectedDays"];
-      details.selectedDays.clear();
-      for (JsonVariant day : daysArray) {
-        details.selectedDays.push_back(day.as<String>());
-      }
-      details.daysPerWeekEnabled = doc["daysPerWeekEnabled"].as<bool>();
-      details.trigger = doc["trigger"].as<String>();
-      details.sensorType = doc["sensorType"].as<String>() ?: "";
-      details.sensorAddress = strtol(doc["sensorAddress"].as<const char *>() ?: "0", nullptr, 16);
-      details.sensorCapability = doc["sensorCapability"].as<String>() ?: "";
-      details.cycleConfig = { 0, 0, false, false };  // Default initialization
-      if (details.trigger == "Cycle Timer") {
-        details.cycleConfig.runSeconds = (doc["runTime"]["hours"].as<int>() * 3600) + (doc["runTime"]["minutes"].as<int>() * 60) + doc["runTime"]["seconds"].as<int>();
-        details.cycleConfig.stopSeconds = (doc["stopTime"]["hours"].as<int>() * 3600) + (doc["stopTime"]["minutes"].as<int>() * 60) + doc["stopTime"]["seconds"].as<int>();
-        details.cycleConfig.startHigh = doc["startHigh"].as<bool>();
-        details.cycleConfig.valid = (details.cycleConfig.runSeconds > 0 && details.cycleConfig.stopSeconds > 0);
-        DEBUG_PRINT(3, "Program %d: Parsed CycleConfig - runSeconds=%d, stopSeconds=%d, startHigh=%d, valid=%d\n",
-                    i, details.cycleConfig.runSeconds, details.cycleConfig.stopSeconds,
-                    details.cycleConfig.startHigh, details.cycleConfig.valid);
-      }
-      if (details.output.equalsIgnoreCase("null") && details.enabled) {
-        null_program_ids.push_back(details.id);
-        ProgramCache.push_back(details);
-        DEBUG_PRINT(1, "Program %d: Added to null_program_ids and Program Cache\n", i);
-      } else {
-        DEBUG_PRINT(3, "Program %d: Loaded, Output=%s, Enabled=%d\n", i, details.output.c_str(), details.enabled);
-        ProgramCache.push_back(details);
-      }
-    } else {
-      DEBUG_PRINT(1, "Program %d: Failed to acquire LittleFS mutex\n", i);
-    }
-  }
-  DEBUG_PRINTLN(1, "Program cache updated.");
-  setProgramPriorities(localEpoch);
-  sendProgramCache();
-}
 
 void sendProgramCache() {
   if (subscriber_epochs.empty()) return;
