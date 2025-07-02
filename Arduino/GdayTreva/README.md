@@ -53,3 +53,4 @@
  - 0.4.2: Standard Program IDs, cycle timer info.
  - 0.4.3: Absolute epoch for cycletimer, send state with cycle timer info.
  - 0.4.4: Default no serial.
+ - 0.4.5: Overflow issues.

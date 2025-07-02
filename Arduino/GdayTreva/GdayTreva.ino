@@ -314,7 +314,7 @@ void sendDiscoveredSensors() {
   if (subscriber_epochs.empty()) return;
   if (xSemaphoreTake(sensorMutex, portTICK_PERIOD_MS * 1000) == pdTRUE) {
     uint32_t new_epoch = millis();
-    size_t jsonSize = detectedSensors.size() * 100 + 256;
+    size_t jsonSize = detectedSensors.size() * 128 + 256;  // Increase estimate
     DynamicJsonDocument doc(jsonSize);
     doc["type"] = "discovered_sensors";
     doc["epoch"] = new_epoch;
@@ -330,20 +330,27 @@ void sendDiscoveredSensors() {
         caps.add(cap);
       }
     }
-    char buffer[1024];
+    size_t requiredSize = measureJson(doc);
+    if (requiredSize > 2048) {  // Increased buffer size
+      Serial.println("DiscoveredSensors JSON too large: " + String(requiredSize) + " bytes");
+      xSemaphoreGive(sensorMutex);
+      return;
+    }
+    char buffer[2048];
     size_t len = serializeJson(doc, buffer, sizeof(buffer));
     if (len == 0) {
       Serial.println("JSON serialization failed");
       xSemaphoreGive(sensorMutex);
       return;
     }
+    DEBUG_PRINT(1, "Sending discovered_sensors JSON (%d bytes): %s\n", len, buffer);
     for (auto &pair : subscriber_epochs) {
       if (new_epoch > pair.second) {
         pair.first->text(buffer);
         pair.second = new_epoch;
       }
     }
-    Serial.println("\nSent sensor data");
+    DEBUG_PRINTLN(1, "Sensor data sent.");
     xSemaphoreGive(sensorMutex);
   }
 }
@@ -1063,10 +1070,6 @@ void onWsEvent(AsyncWebSocket *server, AsyncWebSocketClient *client, AwsEventTyp
         client->text(json);
       }
       subscriber_epochs[client] = 0;
-      sendActiveprograms();
-      sendDiscoveredSensors();
-      sendProgramCache();
-      sendCycleTimerInfo(true);
       break;
     case WS_EVT_DISCONNECT:
       DEBUG_PRINT(2, "WebSocket client #%u disconnected\n", client->id());
@@ -1074,9 +1077,13 @@ void onWsEvent(AsyncWebSocket *server, AsyncWebSocketClient *client, AwsEventTyp
       break;
     case WS_EVT_DATA:
       {
-        DEBUG_PRINT(1, "WebSocket client #%u sent data: %s\n", client->id(), (char *)data);
+        char dataStr[512];
+        size_t copyLen = min(len, sizeof(dataStr) - 1);
+        memcpy(dataStr, data, copyLen);
+        dataStr[copyLen] = '\0';  // Null-terminate
+        DEBUG_PRINT(1, "WebSocket client #%u sent data: %s\n", client->id(), dataStr);
         StaticJsonDocument<512> doc;
-        DeserializationError error = deserializeJson(doc, (char *)data, len);
+        DeserializationError error = deserializeJson(doc, dataStr, len);
         if (!error) {
           const char *command = doc["command"].as<const char *>();
           if (command && strcmp(command, "subscribe_output_status") == 0) {
@@ -1244,6 +1251,9 @@ void handleGetProgram(AsyncWebSocketClient *client, const char *programID) {
 
 void handleSaveProgram(AsyncWebSocketClient *client, const JsonDocument &doc) {
   const char *programID = doc["programID"].as<const char *>();
+  DEBUG_PRINTLN(1, "Saving Program.");
+  DEBUG_PRINT(1, "Recieved programID: ");
+  DEBUG_PRINT(1, programID);
   const char *content = doc["content"].as<const char *>();
   if (!programID || !content) {
     sendProgramResponse(client, false, "Missing programID or content", "");
@@ -1597,7 +1607,7 @@ bool runCycleTimer(const char *output, bool active, const ProgramDetails &prog) 
   static bool cycleAoutput = false;
   static bool cycleBRunning = false;
   static bool cycleBoutput = false;
-   time_t now = time(nullptr);
+  time_t now = time(nullptr);
 
   // Early validation check
   if (active && !prog.cycleConfig.valid) {
@@ -1902,14 +1912,11 @@ void updateProgramCache() {
 
 void sendProgramCache() {
   if (subscriber_epochs.empty()) return;
-
   uint32_t new_epoch = millis();
-  // Estimate JSON size: ~300 bytes per program + overhead
-  size_t jsonSize = ProgramCache.size() * 300 + 256;
+  size_t jsonSize = ProgramCache.size() * 512 + 256;  // Increase estimate
   DynamicJsonDocument doc(jsonSize);
   doc["type"] = "program_cache";
   doc["epoch"] = new_epoch;
-
   JsonArray programs = doc.createNestedArray("programs");
   for (const auto &prog : ProgramCache) {
     JsonObject progObj = programs.createNestedObject();
@@ -1942,14 +1949,18 @@ void sendProgramCache() {
     cycle["startHigh"] = prog.cycleConfig.startHigh;
     cycle["valid"] = prog.cycleConfig.valid;
   }
-
-  char buffer[4096];
+  size_t requiredSize = measureJson(doc);
+  if (requiredSize > 8192) {  // Increased buffer size
+    Serial.println("ProgramCache JSON too large: " + String(requiredSize) + " bytes");
+    return;
+  }
+  char buffer[8192];
   size_t len = serializeJson(doc, buffer, sizeof(buffer));
   if (len == 0) {
     Serial.println("ProgramCache JSON serialization failed");
     return;
   }
-
+  DEBUG_PRINT(1, "Sending program_cache JSON (%d bytes): %s\n", len, buffer);
   for (auto &pair : subscriber_epochs) {
     if (new_epoch > pair.second) {
       pair.first->text(buffer);
@@ -2236,6 +2247,7 @@ void loop() {
     checkInternetConnectivity();
   }
   if (sensorsChanged) {
+    DEBUG_PRINT(1, "Sensors changed, sending to clients. ");
     sendDiscoveredSensors();
     sensorsChanged = false;
   }
