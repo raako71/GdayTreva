@@ -58,6 +58,26 @@ function ProgramEditor({ wsRef, isWsReady, programCache, sensors }) {
     ? [{ value: '', label: 'Select Trigger' }, ...sensorTriggers] // Default for monitor-only
     : [...standardTriggers, ...sensorTriggers];
 
+  function convertSecondsToTimeFields(totalSeconds) {
+    // Handle undefined, null, or non-numeric input
+    if (!Number.isFinite(totalSeconds) || totalSeconds < 0) {
+      return { hours: '', minutes: '', seconds: '' };
+    }
+
+    // Calculate hours, minutes, and seconds
+    const hours = Math.floor(totalSeconds / 3600);
+    const remainingAfterHours = totalSeconds % 3600;
+    const minutes = Math.floor(remainingAfterHours / 60);
+    const seconds = remainingAfterHours % 60;
+
+    // Return as strings to match input field expectations
+    return {
+      hours: hours.toString(),
+      minutes: minutes.toString(),
+      seconds: seconds.toString(),
+    };
+  }
+
   useEffect(() => {
     const params = new URLSearchParams(location.search);
     const id = params.get('programID');
@@ -99,17 +119,16 @@ function ProgramEditor({ wsRef, isWsReady, programCache, sensors }) {
             setSensorAddress('');
             setSensorCapability('');
           }
-          setRunTime({
-            seconds: program.runTime?.seconds?.toString() || '',
-            minutes: program.runTime?.minutes?.toString() || '',
-            hours: program.runTime?.hours?.toString() || '',
-          });
-          setStopTime({
-            seconds: program.stopTime?.seconds?.toString() || '',
-            minutes: program.stopTime?.minutes?.toString() || '',
-            hours: program.stopTime?.hours?.toString() || '',
-          });
-          setStartHigh(program.startHigh !== false);
+          // Updated handling for Cycle Timer data
+          if (program.trigger === 'Cycle Timer' && program.cycleConfig) {
+            setRunTime(convertSecondsToTimeFields(program.cycleConfig.runSeconds));
+            setStopTime(convertSecondsToTimeFields(program.cycleConfig.stopSeconds));
+            setStartHigh(program.cycleConfig.startHigh !== false);
+          } else {
+            setRunTime({ seconds: '', minutes: '', hours: '' });
+            setStopTime({ seconds: '', minutes: '', hours: '' });
+            setStartHigh(true);
+          }
           setStatus(`Loaded program ${parsedID}`);
           setError(null);
         } else {
@@ -128,7 +147,6 @@ function ProgramEditor({ wsRef, isWsReady, programCache, sensors }) {
     const handleMessage = (event) => {
       try {
         const data = JSON.parse(event.data);
-        console.log('Received WebSocket message:', data); // Added for debugging
         if (data.type === 'save_program_response') {
           if (data.success) {
             const assignedID = data.programID || programID;
