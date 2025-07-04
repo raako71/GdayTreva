@@ -1,3 +1,5 @@
+#include <Arduino.h>
+#include <vector>
 #include <Seeed_MCP9600.h>
 #include <SparkFun_VEML6030_Ambient_Light_Sensor.h>
 #include <SensirionI2cSht3x.h>
@@ -5,7 +7,6 @@
 #include <Adafruit_BME280.h>
 #include <ETH.h>
 #include <WiFi.h>
-#include <Arduino.h>
 #include <AsyncTCP.h>
 #include <ESPAsyncWebServer.h>
 #include <LittleFS.h>
@@ -15,11 +16,16 @@
 #include <sys/time.h>
 //#include <ElegantOTA.h>
 #include <map>
-#include <vector>
 #include <Wire.h>
 #include <queue>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
+
+struct SensorInfo;
+struct Config;
+
+SemaphoreHandle_t littlefsMutex = NULL;
+SemaphoreHandle_t i2cMutex = NULL;
 
 #define DEBUG_PRINT(level, ...) \
   do { \
@@ -35,8 +41,6 @@
 
 int debugLevel = 0;
 
-SemaphoreHandle_t littlefsMutex = NULL;
-
 #define FORMAT_LITTLEFS_IF_FAILED true
 
 // Hardware pin definitions
@@ -48,9 +52,9 @@ SemaphoreHandle_t littlefsMutex = NULL;
 #define WIFI_LED 14
 #define INPUT_A 35
 #define INPUT_B 39
-#define IO2 2  //RED LED
-#define IO34 34 //Remote Button
-#define IO36 36 //Unused IO
+#define IO2 2    //RED LED
+#define IO34 34  //Remote Button
+#define IO36 36  //Unused IO
 #define IO15 15  //LEDs Enable
 
 // OTA Credentials
@@ -81,6 +85,14 @@ const unsigned long cacheUpdateInterval = 1000;
 const unsigned long acsPollInterval = 100;
 
 time_t NextCycleToggleA = 0, NextCycleToggleB = 0;
+
+// Helper functions to lock/unlock I2C mutex
+void i2cLock() {
+  xSemaphoreTake(i2cMutex, portTICK_PERIOD_MS * 1000);
+}
+void i2cUnlock() {
+  xSemaphoreGive(i2cMutex);
+}
 
 struct Config {
   char ssid[32];
@@ -161,6 +173,10 @@ struct SensorInfo {
 
 std::vector<SensorInfo> detectedSensors;
 
+bool runCycleTimer(const char *output, bool active, const ProgramDetails &prog);
+PriorityResult determineProgramPriority(const ProgramDetails &prog, time_t now);
+void saveConfiguration(const char *filename, const Config &config);
+
 // I2C Scanner function
 void scanI2CSensors() {
   std::vector<SensorInfo> newSensors;
@@ -173,13 +189,13 @@ void scanI2CSensors() {
   const uint8_t HDC2080_ADDRESSES[] = { 0x40, 0x41 };
   const uint8_t MCP9600_ADDRESSES[] = { 0x60, 0x61, 0x62, 0x63, 0x64, 0x65, 0x66, 0x67 };
 
+  i2cLock();
   for (uint8_t address = 0x08; address <= 0x77; address++) {
     Wire.beginTransmission(address);
     if (Wire.endTransmission() == 0) {
       String sensorType = "Unknown";
       bool isSensor = false;
       unsigned long pollingInterval = 1000;
-      //bool (*pollFunc)(SensorInfo &) = pollGeneric;
       std::vector<String> capabilities;
 
       // Check for sensors in the overlapping address range (0x60 to 0x67)
@@ -195,13 +211,11 @@ void scanI2CSensors() {
               sensorType = "MCP9600";
               isSensor = true;
               pollingInterval = 1000;
-              //pollFunc = pollGeneric;
               capabilities = { "Temperature" };
             } else if ((deviceId >> 8) == 0x41) {  // MCP9600 Device ID
               sensorType = "MCP9601";
               isSensor = true;
               pollingInterval = 1000;
-              //pollFunc = pollGeneric;
               capabilities = { "Temperature" };
             }
           }
@@ -227,7 +241,6 @@ void scanI2CSensors() {
             sensorType = "BME280";
             isSensor = true;
             pollingInterval = 1000;
-            //pollFunc = pollBME280;
             capabilities = { "Temperature", "Humidity", "Pressure" };
             break;
           }
@@ -283,7 +296,7 @@ void scanI2CSensors() {
         newSensors.push_back(sensor);
         DEBUG_PRINT(1, "Identified %s at address 0x%02X with capabilities: ", sensorType.c_str(), address);
         for (const auto &cap : capabilities) {
-          DEBUG_PRINT(1, "%s ", cap.c_str());  // Fixed line
+          DEBUG_PRINT(1, "%s ", cap.c_str());
         }
         DEBUG_PRINT(1, "\n");
       } else {
@@ -291,6 +304,7 @@ void scanI2CSensors() {
       }
     }
   }
+  i2cUnlock();
 
   // Compare newSensors with detectedSensors
   sensorsChanged = (newSensors != detectedSensors);
@@ -315,10 +329,8 @@ void requestSensorScan() {
   }
 }
 
-SemaphoreHandle_t sensorMutex = xSemaphoreCreateMutex();
 void sendDiscoveredSensors() {
   if (subscriber_epochs.empty()) return;
-  if (xSemaphoreTake(sensorMutex, portTICK_PERIOD_MS * 1000) == pdTRUE) {
     uint32_t new_epoch = millis();
     size_t jsonSize = detectedSensors.size() * 128 + 256;  // Increase estimate
     DynamicJsonDocument doc(jsonSize);
@@ -339,14 +351,12 @@ void sendDiscoveredSensors() {
     size_t requiredSize = measureJson(doc);
     if (requiredSize > 2048) {  // Increased buffer size
       Serial.println("DiscoveredSensors JSON too large: " + String(requiredSize) + " bytes");
-      xSemaphoreGive(sensorMutex);
       return;
     }
     char buffer[2048];
     size_t len = serializeJson(doc, buffer, sizeof(buffer));
     if (len == 0) {
       Serial.println("JSON serialization failed");
-      xSemaphoreGive(sensorMutex);
       return;
     }
     DEBUG_PRINT(1, "Sending discovered_sensors JSON (%d bytes): %s\n", len, buffer);
@@ -357,8 +367,6 @@ void sendDiscoveredSensors() {
       }
     }
     DEBUG_PRINTLN(1, "Sensor data sent.");
-    xSemaphoreGive(sensorMutex);
-  }
 }
 
 void sendActiveprograms() {
@@ -440,14 +448,8 @@ bool addSensorIfUnique(const String &sensorType, uint8_t sensorAddress, const St
 }
 
 void updateActiveSensors() {
-  if (xSemaphoreTake(sensorMutex, portTICK_PERIOD_MS * 1000) != pdTRUE) {
-    DEBUG_PRINT(1, "Failed to acquire sensorMutex in updateActiveSensors\n");
-    return;
-  }
-
   DEBUG_PRINT(1, "updateActiveSensors\n");
   activeSensors.clear();
-
   // Process null_program_ids
   for (const int id : null_program_ids) {
     DEBUG_PRINT(1, "NULL Prog ID: %d\n", id);
@@ -506,9 +508,7 @@ void updateActiveSensors() {
       addSensorIfUnique(it->sensorType, it->sensorAddress, it->sensorCapability, activeSensors);
     }
   }
-
   DEBUG_PRINT(1, "Updated activeSensors with %d sensors\n", activeSensors.size());
-  xSemaphoreGive(sensorMutex);
 }
 
 // Polling function for VEML6030
@@ -523,21 +523,21 @@ std::map<String, String> pollVEML6030(SensorInfo &sensor) {
   }
   static std::map<uint8_t, SparkFun_Ambient_Light> veml6030Sensors;
   static std::map<uint8_t, bool> initialized;
+  i2cLock();
   if (!initialized[sensor.address]) {
-    // Insert sensor object with explicit constructor
     auto result = veml6030Sensors.emplace(sensor.address, SparkFun_Ambient_Light(sensor.address));
     if (!result.second) {
-      // Key already exists, update the value
       result.first->second = SparkFun_Ambient_Light(sensor.address);
     }
-    // Access sensor via iterator to avoid operator[]
     auto sensor_it = veml6030Sensors.find(sensor.address);
     if (sensor_it == veml6030Sensors.end()) {
       DEBUG_PRINT(1, "VEML6030 not found at 0x%02X after insertion\n", sensor.address);
+      i2cUnlock();
       return readings;
     }
     if (!sensor_it->second.begin()) {
       DEBUG_PRINT(1, "VEML6030 initialization failed at 0x%02X\n", sensor.address);
+      i2cUnlock();
       return readings;
     }
     DEBUG_PRINT(1, "VEML6030 initialized at 0x%02X\n", sensor.address);
@@ -545,13 +545,14 @@ std::map<String, String> pollVEML6030(SensorInfo &sensor) {
     sensor_it->second.setIntegTime(100);
     initialized[sensor.address] = true;
   }
-  // Access sensor via find to avoid operator[]
   auto sensor_it = veml6030Sensors.find(sensor.address);
   if (sensor_it == veml6030Sensors.end()) {
     DEBUG_PRINT(1, "VEML6030 not found at 0x%02X\n", sensor.address);
+    i2cUnlock();
     return readings;
   }
   long lux = sensor_it->second.readLight();
+  i2cUnlock();
   if (lux < 0) {
     DEBUG_PRINT(1, "VEML6030 read failed at 0x%02X\n", sensor.address);
     return readings;
@@ -578,33 +579,33 @@ std::map<String, String> pollHDC2080(SensorInfo &sensor) {
   }
   static std::map<uint8_t, HDC2080> hdc2080Sensors;
   static std::map<uint8_t, bool> initialized;
+  i2cLock();
   if (!initialized[sensor.address]) {
-    // Insert sensor object with explicit constructor
     auto result = hdc2080Sensors.emplace(sensor.address, HDC2080(sensor.address));
     if (!result.second) {
-      // Key already exists, update the value
       result.first->second = HDC2080(sensor.address);
     }
-    // Access sensor via iterator to avoid operator[]
     auto sensor_it = hdc2080Sensors.find(sensor.address);
     if (sensor_it == hdc2080Sensors.end()) {
       DEBUG_PRINT(1, "HDC2080 not found at 0x%02X after insertion\n", sensor.address);
+      i2cUnlock();
       return readings;
     }
-    sensor_it->second.begin();  // No return value check
+    sensor_it->second.begin();
     sensor_it->second.setMeasurementMode(TEMP_AND_HUMID);
     sensor_it->second.setRate(ONE_HZ);
     DEBUG_PRINT(1, "HDC2080 initialized at 0x%02X\n", sensor.address);
     initialized[sensor.address] = true;
   }
-  // Access sensor via find to avoid operator[]
   auto sensor_it = hdc2080Sensors.find(sensor.address);
   if (sensor_it == hdc2080Sensors.end()) {
     DEBUG_PRINT(1, "HDC2080 not found at 0x%02X\n", sensor.address);
+    i2cUnlock();
     return readings;
   }
   float temp = sensor_it->second.readTemp();
   float hum = sensor_it->second.readHumidity();
+  i2cUnlock();
   if (isnan(temp) || isnan(hum)) {
     DEBUG_PRINT(1, "HDC2080 read failed at 0x%02X\n", sensor.address);
     return readings;
@@ -634,12 +635,14 @@ std::map<String, String> pollMCP9600(SensorInfo &sensor) {
   }
   static std::map<uint8_t, MCP9600> mcp9600Sensors;
   static std::map<uint8_t, bool> initialized;
+  i2cLock();
   if (!initialized[sensor.address]) {
     mcp9600Sensors.emplace(std::piecewise_construct,
                            std::forward_as_tuple(sensor.address),
                            std::forward_as_tuple(sensor.address));
     if (mcp9600Sensors[sensor.address].init(THER_TYPE_K) != NO_ERROR) {
       DEBUG_PRINT(1, "MCP9600 initialization failed at 0x%02X\n", sensor.address);
+      i2cUnlock();
       return readings;
     }
     DEBUG_PRINT(1, "MCP9600 initialized at 0x%02X\n", sensor.address);
@@ -648,8 +651,10 @@ std::map<String, String> pollMCP9600(SensorInfo &sensor) {
   float temp;
   if (mcp9600Sensors[sensor.address].read_hot_junc(&temp) != NO_ERROR) {
     DEBUG_PRINT(1, "MCP9600 read failed at 0x%02X\n", sensor.address);
+    i2cUnlock();
     return readings;
   }
+  i2cUnlock();
   char value[32];
   for (const auto &cap : sensor.capabilities) {
     if (cap == "Temperature") {
@@ -663,48 +668,40 @@ std::map<String, String> pollMCP9600(SensorInfo &sensor) {
 // Polling function for SHT3x
 std::map<String, String> pollSHT3x(SensorInfo &sensor) {
   std::map<String, String> readings;
-
-  // Initialize readings to -1
   for (const auto &cap : sensor.capabilities) {
     readings[cap] = "-1";
   }
-
-  // Validate sensor type
   if (sensor.type != "SHT3x-DIS") {
     DEBUG_PRINT(1, "Invalid sensor type for SHT3x: %s\n", sensor.type.c_str());
     return readings;
   }
-
-  // Manage sensors by address
   static std::map<uint8_t, SensirionI2cSht3x> sht3xSensors;
   static std::map<uint8_t, bool> initialized;
+  i2cLock();
   if (!initialized[sensor.address]) {
     sht3xSensors[sensor.address].begin(Wire, sensor.address);
-    if (sht3xSensors[sensor.address].softReset() != NO_ERROR) {  // Use NO_ERROR
+    if (sht3xSensors[sensor.address].softReset() != NO_ERROR) {
       DEBUG_PRINT(1, "SHT3x initialization failed at 0x%02X\n", sensor.address);
+      i2cUnlock();
       return readings;
-    } else {
-      DEBUG_PRINT(1, "SHT3x initialized at 0x%02X\n", sensor.address);
     }
+    DEBUG_PRINT(1, "SHT3x initialized at 0x%02X\n", sensor.address);
     initialized[sensor.address] = true;
   }
-
-  // Read measurements
   float temp, hum;
   int16_t error = sht3xSensors[sensor.address].measureSingleShot(REPEATABILITY_HIGH, false, temp, hum);
+  i2cUnlock();
   if (error != NO_ERROR) {
     DEBUG_PRINT(1, "SHT3x read failed at 0x%02X, error: 0x%04X\n", sensor.address, error);
     return readings;
   }
-
-  // Format readings
   char value[16];
   for (const auto &cap : sensor.capabilities) {
     if (cap == "Temperature") {
-      snprintf(value, sizeof(value), "%.1f", temp);  // 1 decimal place
+      snprintf(value, sizeof(value), "%.1f", temp);
       readings[cap] = value;
     } else if (cap == "Humidity") {
-      snprintf(value, sizeof(value), "%.1f", hum);  // 1 decimal place
+      snprintf(value, sizeof(value), "%.1f", hum);
       readings[cap] = value;
     }
   }
@@ -714,52 +711,43 @@ std::map<String, String> pollSHT3x(SensorInfo &sensor) {
 // Polling function for BME280
 std::map<String, String> pollBME280(SensorInfo &sensor) {
   std::map<String, String> readings;
-
-  // Initialize readings to -1
   for (const auto &cap : sensor.capabilities) {
     readings[cap] = "-1";
   }
-
-  // Validate sensor type
   if (sensor.type != "BME280") {
     DEBUG_PRINT(1, "Invalid sensor type for BME280: %s\n", sensor.type.c_str());
     return readings;
   }
-
-  // Manage sensors by address
   static std::map<uint8_t, Adafruit_BME280> bme280Sensors;
   static std::map<uint8_t, bool> initialized;
+  i2cLock();
   if (!initialized[sensor.address]) {
     if (!bme280Sensors[sensor.address].begin(sensor.address, &Wire)) {
       DEBUG_PRINT(1, "BME280 initialization failed at 0x%02X\n", sensor.address);
+      i2cUnlock();
       return readings;
-    } else {
-      DEBUG_PRINT(1, "BME280 initialized at 0x%02X\n", sensor.address);
     }
+    DEBUG_PRINT(1, "BME280 initialized at 0x%02X\n", sensor.address);
     initialized[sensor.address] = true;
   }
-
-  // Read measurements
   float temp = bme280Sensors[sensor.address].readTemperature();
   float hum = bme280Sensors[sensor.address].readHumidity();
   float pres = bme280Sensors[sensor.address].readPressure() / 100.0F;
-
+  i2cUnlock();
   if (isnan(temp) || isnan(hum) || isnan(pres)) {
     DEBUG_PRINT(1, "BME280 read failed at 0x%02X\n", sensor.address);
     return readings;
   }
-
-  // Format readings
   char value[16];
   for (const auto &cap : sensor.capabilities) {
     if (cap == "Temperature") {
-      snprintf(value, sizeof(value), "%.1f", temp);  // 1 decimal place
+      snprintf(value, sizeof(value), "%.1f", temp);
       readings[cap] = value;
     } else if (cap == "Humidity") {
-      snprintf(value, sizeof(value), "%.1f", hum);  // 1 decimal place
+      snprintf(value, sizeof(value), "%.1f", hum);
       readings[cap] = value;
     } else if (cap == "Pressure") {
-      snprintf(value, sizeof(value), "%.1f", pres);  // 1 decimal place
+      snprintf(value, sizeof(value), "%.1f", pres);
       readings[cap] = value;
     }
   }
@@ -783,6 +771,7 @@ std::map<String, String> pollACS71020(SensorInfo &sensor) {
     return readings;
   }
   const int maxRetries = 3;
+  i2cLock();
   for (int attempt = 1; attempt <= maxRetries; attempt++) {
     Wire.beginTransmission(sensor.address);
     Wire.write(0x20);
@@ -790,8 +779,9 @@ std::map<String, String> pollACS71020(SensorInfo &sensor) {
       Wire.requestFrom(sensor.address, (uint8_t)2);
       if (Wire.available() == 2) {
         uint16_t raw = (Wire.read() << 8) | Wire.read();
+        i2cUnlock();
         float current = raw * 0.1f;
-        int voltage = readVoltage(sensor.address);  // Fixed placeholder
+        int voltage = readVoltage(sensor.address);
         int power = static_cast<int>(current * voltage);
         char value[32];
         for (const auto &cap : sensor.capabilities) {
@@ -809,8 +799,11 @@ std::map<String, String> pollACS71020(SensorInfo &sensor) {
         return readings;
       }
     }
+    i2cUnlock();
     delay(10);
+    i2cLock();
   }
+  i2cUnlock();
   DEBUG_PRINT(1, "ACS71020 read failed at 0x%02X\n", sensor.address);
   return readings;
 }
@@ -1994,7 +1987,7 @@ void updateOutputs() {
       if (prog.id == activeProgramA) {
         if (prog.trigger == "Cycle Timer") {
           outputAState = runCycleTimer("A", true, prog);
-        } else if (prog.trigger == "Always On") {
+        } else if (prog.trigger == "Manual") {
           outputAState = true;
           runCycleTimer("A", false, prog);  // Stop any running cycle
         } else {
@@ -2013,7 +2006,7 @@ void updateOutputs() {
       if (prog.id == activeProgramB) {
         if (prog.trigger == "Cycle Timer") {
           outputBState = runCycleTimer("B", true, prog);
-        } else if (prog.trigger == "Always On") {
+        } else if (prog.trigger == "Manual") {
           outputBState = true;
           runCycleTimer("B", false, prog);  // Stop any running cycle
         } else {
@@ -2151,9 +2144,15 @@ void setup() {
     return;
   }
 
+  i2cMutex = xSemaphoreCreateMutex();
+  if (i2cMutex == NULL) {
+    Serial.println("Failed to create I2C mutex");
+    return;
+  }
+
   // Initialize I2C
   Wire.begin(I2C_SDA, I2C_SCL);
-  Serial.println("I2C initialized on SDA: " + String(I2C_SDA) + ", SCL: " + String(I2C_SCL));
+  Serial.println("I2C initialized");
 
   // Create FreeRTOS task for I2C scanning
   xTaskCreatePinnedToCore(i2cScanTask, "I2CScan", 4096, NULL, 1, NULL, 0);
@@ -2175,7 +2174,7 @@ void setup() {
   pinMode(WIFI_LED, OUTPUT);
   pinMode(INPUT_A, INPUT);
   pinMode(INPUT_B, INPUT);
-  pinMode(IO34, INPUT); //Remote Button
+  pinMode(IO34, INPUT);  //Remote Button
   //pinMode(IO36, INPUT); // Unused IO
   pinMode(IO2, OUTPUT);   //RED LED
   pinMode(IO15, OUTPUT);  //LEDs Enable
@@ -2245,6 +2244,8 @@ void setup() {
   updateProgramCache();
   digitalWrite(WIFI_LED, LOW);
 }
+
+
 
 void loop() {
   static unsigned long lastWiFiRetry = 0;
