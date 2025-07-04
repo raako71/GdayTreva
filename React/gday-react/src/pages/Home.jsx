@@ -14,7 +14,7 @@ const formatCountdown = (secondsLeft) => {
     .padStart(2, '0')}m ${seconds.toString().padStart(2, '0')}s`;
 };
 
-function Home({ activeProgramData, programCache, message, cycleTimerStatus }) {
+function Home({ activeProgramData, programCache, message, cycleTimerStatus, resetCycleTimer }) {
   const [countdowns, setCountdowns] = useState({});
   const messageRef = useRef(message);
   const cycleTimerStatusRef = useRef(cycleTimerStatus);
@@ -128,15 +128,25 @@ function Home({ activeProgramData, programCache, message, cycleTimerStatus }) {
               <p>Sensor Value: {sensorValue}</p>
             )}
             {prog.trigger === 'Cycle Timer' && prog.cycleConfig?.valid && (
-              <p>
-                Next Toggle:{' '}
-                {countdowns[String(prog.id)] || 'Awaiting Schedule'}
-              </p>
+              <>
+                <p>
+                  Next Toggle:{' '}
+                  {countdowns[String(prog.id)] || 'Awaiting Schedule'}
+                </p>
+                <div className="overlay-buttons">
+                <button
+                  onClick={() => resetCycleTimer(prog.output === 'A' ? 'reset_A' : 'reset_B')}
+                  className="save-button"
+                >
+                  Reset Cycle Timer
+                </button>
+                </div>
+              </>
             )}
           </div>
         );
       });
-  }, [programCache, activeProgramData, cycleTimerStatus, countdowns]);
+  }, [programCache, activeProgramData, cycleTimerStatus, countdowns, resetCycleTimer]);
 
   return (
     <div>
@@ -203,6 +213,7 @@ Home.propTypes = {
     outputAState: PropTypes.bool,
     outputBState: PropTypes.bool,
   }),
+  resetCycleTimer: PropTypes.func,
 };
 
 Home.defaultProps = {
@@ -210,6 +221,7 @@ Home.defaultProps = {
   programCache: [],
   message: { epoch: 0, device_name: '' },
   cycleTimerStatus: { NextCycleToggleA: 0, NextCycleToggleB: 0, outputAState: false, outputBState: false },
+  resetCycleTimer: () => {},
 };
 
 export default Home;

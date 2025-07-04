@@ -144,6 +144,7 @@ Settings.propTypes = {
       active: PropTypes.bool.isRequired,
     })
   ).isRequired,
+  refreshSensors: PropTypes.func,
 };
 
 export default Settings;

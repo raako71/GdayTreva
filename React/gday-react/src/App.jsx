@@ -36,6 +36,14 @@ function App() {
     }
   }, []);
 
+  const resetCycleTimer = useCallback((command) => {
+  if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+    wsRef.current.send(JSON.stringify({ command }));
+  } else {
+    console.warn('WebSocket not connected, cannot reset cycle timer');
+  }
+}, []);
+
   const getPrograms = useCallback(() => {
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
       wsRef.current.send(JSON.stringify({ command: 'get_program_cache' }));
@@ -196,6 +204,7 @@ function App() {
           element={
             <Home
               message={message}
+              resetCycleTimer={resetCycleTimer}
               wsRef={wsRef}
               isWsReady={isWsReady}
               activeProgramData={activeProgramData}

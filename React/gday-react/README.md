@@ -54,3 +54,4 @@ R0.51: Display Cycle Timer.
 R0.52: Display state for Cycle Timer.
 R0.53: getPrograms, getSensors, subscribe_output_status, flex wrap, fix program saving.
 R0.54: Parse Cycle Timer in cache.
+R0.55: Restart Cycle Timer.
