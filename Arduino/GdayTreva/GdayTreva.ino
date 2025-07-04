@@ -39,13 +39,19 @@ SemaphoreHandle_t littlefsMutex = NULL;
 
 #define FORMAT_LITTLEFS_IF_FAILED true
 
-// Pin definitions for outputs A and B
+// Hardware pin definitions
 #define OUTPUT_A_PIN 4
 #define OUTPUT_B_PIN 12
-
-// I2C Pin definitions
 #define I2C_SDA 32
 #define I2C_SCL 33
+#define WIFI_BTN 13
+#define WIFI_LED 14
+#define INPUT_A 35
+#define INPUT_B 39
+#define IO2 2  //RED LED
+#define IO34 34 //Remote Button
+#define IO36 36 //Unused IO
+#define IO15 15  //LEDs Enable
 
 // OTA Credentials
 const char *OTA_USERNAME = "admin";
@@ -977,6 +983,7 @@ void networkEvent(arduino_event_id_t event) {
     case ARDUINO_EVENT_WIFI_STA_CONNECTED:
       Serial.println("\nWiFi connected.");
       wifi_connected = true;
+      digitalWrite(WIFI_LED, HIGH);
       break;
     case ARDUINO_EVENT_WIFI_STA_GOT_IP:
       Serial.print("\nWiFi IP address: ");
@@ -995,6 +1002,7 @@ void networkEvent(arduino_event_id_t event) {
     case ARDUINO_EVENT_WIFI_STA_DISCONNECTED:
       if (wifi_connected) Serial.println("\nWiFi disconnected.");
       wifi_connected = false;
+      digitalWrite(WIFI_LED, LOW);
       network_up = eth_connected || wifi_connected;
       if (!network_up) {
         MDNS.end();
@@ -2159,12 +2167,23 @@ void setup() {
 
   standardizeProgramIDs();
 
-  pinMode(5, OUTPUT);
-  digitalWrite(5, HIGH);
+  //pinMode(PHY_PWR, OUTPUT);
+  //digitalWrite(PHY_PWR, HIGH);
   pinMode(OUTPUT_A_PIN, OUTPUT);
   pinMode(OUTPUT_B_PIN, OUTPUT);
+  pinMode(WIFI_BTN, INPUT);
+  pinMode(WIFI_LED, OUTPUT);
+  pinMode(INPUT_A, INPUT);
+  pinMode(INPUT_B, INPUT);
+  pinMode(IO34, INPUT); //Remote Button
+  //pinMode(IO36, INPUT); // Unused IO
+  pinMode(IO2, OUTPUT);   //RED LED
+  pinMode(IO15, OUTPUT);  //LEDs Enable
   digitalWrite(OUTPUT_A_PIN, LOW);
   digitalWrite(OUTPUT_B_PIN, LOW);
+  digitalWrite(WIFI_LED, HIGH);
+  digitalWrite(IO2, HIGH);
+  digitalWrite(IO15, HIGH);
   delay(100);
   if (!ETH.begin(ETH_PHY_LAN8720, 0, 23, 18, 5, ETH_CLOCK_GPIO17_OUT)) {
     Serial.println("Ethernet failed to start");
@@ -2224,6 +2243,7 @@ void setup() {
   //ElegantOTA.begin(&server, OTA_USERNAME, OTA_PASSWORD);
   server.begin();
   updateProgramCache();
+  digitalWrite(WIFI_LED, LOW);
 }
 
 void loop() {
@@ -2278,6 +2298,20 @@ void loop() {
     if (millis() - lastTimeSend >= 1000) {
       sendTimeToClients();
       lastTimeSend = millis();
+      bool readA = digitalRead(INPUT_A);
+      if (readA) {
+        DEBUG_PRINTLN(1, "Input A Pin High");
+      }
+      bool readB = digitalRead(INPUT_B);
+      if (readB) {
+        DEBUG_PRINTLN(1, "Input B Pin High");
+      }
+      static bool readIO34 = false;
+      readIO34 =  digitalRead(IO34);
+      if (readIO34) {
+        digitalWrite(IO15, HIGH);
+        DEBUG_PRINTLN(1, "Input IO34 Pin High"); //Remote Push Button
+      } else digitalWrite(IO15, LOW);
     }
   }
   //ElegantOTA.loop();
