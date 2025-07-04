@@ -2042,7 +2042,7 @@ void printStatus() {
   }
   Serial.printf("activeSensors has %d sensors\n", activeSensors.size());
   for (const auto &sensor : activeSensors) {
-    Serial.print("Active Sensor: Type=");
+    Serial.print("Type=");
     Serial.print(sensor.type.c_str());
     Serial.printf(", Address=0x%02X", sensor.address);
     Serial.printf(", PollingInterval=%lums", sensor.maxPollingInterval);
@@ -2056,7 +2056,7 @@ void printStatus() {
     Serial.println("]");
   }
   for (const auto &pair : sensorReadingsCache) {
-    Serial.print("Sensors:  ");
+    Serial.print("Sensor Reading:  ");
     Serial.print(pair.first.c_str());
     Serial.print(": ");
     Serial.println(pair.second.c_str());

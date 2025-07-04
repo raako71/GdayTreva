@@ -55,6 +55,6 @@
  - 0.4.4: Default no serial.
  - 0.4.5: Overflow issues.
  - 0.4.6: Reset Cycle Timer on program save.
- - 0.4.7: Restart Cycle Timer on button only.
+ - 0.4.7: Restart Cycle Timer on button only. 4 July 25
  - 0.4.8: Preliminary work on LEDs and input push buttons.
  - 0.4.9: i2cMutex. Manual mode resolved.
