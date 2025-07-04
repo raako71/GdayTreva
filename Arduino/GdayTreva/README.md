@@ -55,3 +55,4 @@
  - 0.4.4: Default no serial.
  - 0.4.5: Overflow issues.
  - 0.4.6: Reset Cycle Timer on program save.
+ - 0.4.7: Restart Cycle Timer on button only.

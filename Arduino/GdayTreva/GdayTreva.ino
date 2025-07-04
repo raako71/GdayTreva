@@ -1116,6 +1116,12 @@ void onWsEvent(AsyncWebSocket *server, AsyncWebSocketClient *client, AwsEventTyp
             else sendErrorResponse(client, "", "Missing programID");
           } else if (command && strcmp(command, "get_program_cache") == 0) {
             sendProgramCache();
+          } else if (command && strcmp(command, "reset_A") == 0) {
+            runCycleTimer("A", false, ProgramDetails{});
+            DEBUG_PRINTLN(1, "Reset Cycle Timer A command recieved");
+          } else if (command && strcmp(command, "reset_B") == 0) {
+            runCycleTimer("B", false, ProgramDetails{});
+            DEBUG_PRINTLN(1, "Reset Cycle Timer B command recieved");
           } else if (command && strcmp(command, "refresh-sensors") == 0) {
             requestSensorScan();
             sendDiscoveredSensors();
@@ -1380,12 +1386,6 @@ void updateProgramCache(const char *programID = nullptr) {
       } else {
         DEBUG_PRINT(3, "Program %d: Loaded, Output=%s, Enabled=%d\n", i, details.output.c_str(), details.enabled);
         ProgramCache.push_back(details);
-      }
-      if (programID) {
-        if (activeProgramA == i || i == activeProgramB) {
-          runCycleTimer(details.output.c_str(), false, details);
-          DEBUG_PRINT(1, "Program %d: Triggered runCycleTimer for output %s\n", i, details.output.c_str());
-        }
       }
     } else {
       DEBUG_PRINT(1, "Program %d: Failed to acquire LittleFS mutex\n", i);
